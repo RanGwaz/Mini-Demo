@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import {
   ArrowRight,
-  Clock,
-  Compass,
+  Camera,
+  CoffeeCup,
   HomeFilled,
-  Location,
+  MagicStick,
+  Notebook,
   Star,
-  TrendCharts,
   UserFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
@@ -23,25 +23,23 @@ const route = useRoute()
 
 const navItems = [
   { key: 'recommend', label: '为你推荐', icon: HomeFilled, path: '/feed' },
-  { key: 'hot', label: '热门', icon: TrendCharts },
-  { key: 'city', label: '同城', icon: Location },
-  { key: 'friends', label: '朋友', icon: UserFilled },
-  { key: 'favorite', label: '收藏', icon: Star },
-  { key: 'later', label: '稍后再看', icon: Clock },
-  { key: 'community', label: '社群', icon: Compass },
+  { key: 'following', label: '关注', icon: UserFilled },
+  { key: 'friends', label: '朋友动态', icon: Star },
+  { key: 'campus', label: '大学生校园生活', icon: Notebook },
+  { key: 'photo', label: '摄影爱好者', icon: Camera },
+  { key: 'ai', label: 'AI工具分享', icon: MagicStick },
+  { key: 'dev', label: '程序员摸鱼社区', icon: CoffeeCup },
 ] satisfies Array<{
   key: string
   label: string
   icon: typeof HomeFilled
   path?: string
-  badge?: string
 }>
 
-const followedCommunities = [
-  { name: '旅行日记', members: '26.5万成员', badge: '99+', avatar: 'https://picsum.photos/seed/sidebar-travel/80/80' },
-  { name: '健身打卡', members: '15.3万成员', badge: '6', avatar: 'https://picsum.photos/seed/sidebar-fitness/80/80' },
-  { name: '数码玩家', members: '12.9万成员', badge: '3', avatar: 'https://picsum.photos/seed/sidebar-digital/80/80' },
-  { name: '摄影世界', members: '8.7万成员', badge: '2', avatar: 'https://picsum.photos/seed/sidebar-photo/80/80' },
+const audienceRows = [
+  { name: '二次元穿搭', members: '6.9万活跃', avatar: 'https://picsum.photos/seed/sidebar-anime/80/80' },
+  { name: '宠物日常', members: '15.1万活跃', avatar: 'https://picsum.photos/seed/sidebar-pet/80/80' },
+  { name: '留学生生活', members: '5.4万活跃', avatar: 'https://picsum.photos/seed/sidebar-abroad/80/80' },
 ]
 
 function isActive(itemPath?: string) {
@@ -59,7 +57,7 @@ function handleNav(item: (typeof navItems)[number]) {
     void router.push(item.path)
     return
   }
-  ElMessage.info(`${item.label} 功能正在完善中`)
+  ElMessage.info(`${item.label} 内容筛选正在接入中`)
 }
 </script>
 
@@ -81,7 +79,7 @@ function handleNav(item: (typeof navItems)[number]) {
 
     <section class="common-left-rail__community">
       <div class="common-left-rail__title">
-        <span>我关注的社群</span>
+        <span>细分人群</span>
         <button type="button">
           更多
           <el-icon><ArrowRight /></el-icon>
@@ -89,20 +87,17 @@ function handleNav(item: (typeof navItems)[number]) {
       </div>
 
       <button
-        v-for="community in followedCommunities"
-        :key="community.name"
+        v-for="audience in audienceRows"
+        :key="audience.name"
         type="button"
         class="common-left-rail__community-row"
       >
-        <img :src="community.avatar" alt="" />
+        <img :src="audience.avatar" alt="" />
         <span>
-          <strong>{{ community.name }}</strong>
-          <small>{{ community.members }}</small>
+          <strong>{{ audience.name }}</strong>
+          <small>{{ audience.members }}</small>
         </span>
-        <em>{{ community.badge }}</em>
       </button>
-
-      <button type="button" class="common-left-rail__create-community">+ 创建社群</button>
     </section>
   </aside>
 </template>
@@ -135,8 +130,7 @@ function handleNav(item: (typeof navItems)[number]) {
 }
 
 .common-left-rail__side-item,
-.common-left-rail__community-row,
-.common-left-rail__create-community {
+.common-left-rail__community-row {
   width: 100%;
   border: none;
   background: transparent;
@@ -160,17 +154,6 @@ function handleNav(item: (typeof navItems)[number]) {
 .common-left-rail__side-item .el-icon {
   flex: 0 0 auto;
   font-size: 20px;
-}
-
-.common-left-rail__side-item em {
-  margin-left: auto;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: #fff1ed;
-  color: #ff5a45;
-  font-style: normal;
-  font-size: 11px;
-  font-weight: 800;
 }
 
 .common-left-rail__side-item:hover,
@@ -210,7 +193,7 @@ function handleNav(item: (typeof navItems)[number]) {
 
 .common-left-rail__community-row {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 34px minmax(0, 1fr);
   align-items: center;
   gap: 9px;
   padding: 8px 2px;
@@ -245,32 +228,6 @@ function handleNav(item: (typeof navItems)[number]) {
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.common-left-rail__community-row em {
-  min-width: 22px;
-  padding: 2px 5px;
-  border-radius: 999px;
-  background: #ff5a45;
-  color: #fff;
-  font-style: normal;
-  font-size: 11px;
-  font-weight: 800;
-  text-align: center;
-}
-
-.common-left-rail__create-community {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 36px;
-  margin-top: 10px;
-  border-radius: 8px;
-  background: #fff1ed;
-  color: #ff5a45;
-  font-size: 13px;
-  font-weight: 760;
 }
 
 @media (max-width: 1280px) {

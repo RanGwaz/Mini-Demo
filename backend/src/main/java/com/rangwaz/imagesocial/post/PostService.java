@@ -79,15 +79,16 @@ public class PostService {
     @Transactional
     public PostView createPost(Long authorId, CreatePostRequest request) {
         User author = userService.requireById(authorId);
-        PostAssetRequest firstAsset = request.assets().get(0);
+        List<PostAssetRequest> assets = request.assets() == null ? List.of() : request.assets();
+        PostAssetRequest firstAsset = assets.isEmpty() ? null : assets.get(0);
 
         Post post = new Post();
         post.setAuthorId(authorId);
         post.setTitle(request.title());
         post.setContent(request.content());
         post.setTags(joinTags(request.tags()));
-        post.setCoverUrl(firstAsset.fileUrl());
-        post.setThumbUrl(firstAsset.thumbUrl());
+        post.setCoverUrl(firstAsset == null ? "" : firstAsset.fileUrl());
+        post.setThumbUrl(firstAsset == null ? null : firstAsset.thumbUrl());
         post.setVisibility("PUBLIC");
         post.setAuditStatus("APPROVED");
         post.setLikeCount(0);
@@ -97,7 +98,7 @@ public class PostService {
         post.setHotScore(BigDecimal.ZERO);
         postMapper.insert(post);
 
-        for (PostAssetRequest assetRequest : request.assets()) {
+        for (PostAssetRequest assetRequest : assets) {
             PostAsset asset = new PostAsset();
             asset.setPostId(post.getId());
             asset.setObjectKey(assetRequest.objectKey());

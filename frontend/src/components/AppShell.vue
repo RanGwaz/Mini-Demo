@@ -3,10 +3,12 @@ import {
   ArrowDown,
   Bell,
   ChatDotRound,
+  EditPen,
   Plus,
   Search,
+  SwitchButton,
+  User,
   UserFilled,
-  VideoPlay,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { ref, watch } from 'vue'
@@ -25,8 +27,6 @@ const navItems = [
   { key: 'feed', label: '首页', path: '/feed' },
   { key: 'discover', label: '发现' },
   { key: 'following', label: '关注' },
-  { key: 'video', label: '视频', icon: VideoPlay },
-  { key: 'community', label: '社群' },
   { key: 'creator', label: '创作中心', path: '/publish' },
 ]
 
@@ -62,16 +62,28 @@ function submitGlobalSearch() {
   void router.push({ path: '/feed', query: { q: keyword } })
 }
 
-function openProfile() {
+function publish() {
+  go('/publish')
+}
+
+async function handleAvatarCommand(command: string) {
   if (!authStore.currentUser) {
     authStore.openAuthPrompt('manual')
     return
   }
-  go('/profile')
-}
-
-function publish() {
-  go('/publish')
+  if (command === 'profile') {
+    go('/profile')
+    return
+  }
+  if (command === 'publish') {
+    go('/publish')
+    return
+  }
+  if (command === 'logout') {
+    await authStore.logout()
+    ElMessage.success('已退出登录')
+    go('/feed')
+  }
 }
 
 watch(
@@ -109,7 +121,6 @@ watch(
           :class="{ 'is-active': isNavActive(item) }"
           @click="handleNav(item)"
         >
-          <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
           <span>{{ item.label }}</span>
         </button>
       </nav>
@@ -123,16 +134,40 @@ watch(
           <el-icon><Bell /></el-icon>
           <em>12</em>
         </button>
-        <button type="button" class="app-shell__avatar-btn" aria-label="个人主页" @click="openProfile">
-          <img
-            v-if="authStore.currentUser?.avatarUrl"
-            :src="authStore.currentUser.avatarUrl"
-            :alt="authStore.currentUser.nickname"
-          />
-          <el-icon v-else><UserFilled /></el-icon>
-          <span v-if="authStore.currentUser" />
-          <el-icon class="app-shell__avatar-caret"><ArrowDown /></el-icon>
-        </button>
+
+        <el-dropdown trigger="click" placement="bottom-end" @command="handleAvatarCommand">
+          <button type="button" class="app-shell__avatar-btn" aria-label="账户菜单" @click.stop>
+            <img
+              v-if="authStore.currentUser?.avatarUrl"
+              :src="authStore.currentUser.avatarUrl"
+              :alt="authStore.currentUser.nickname"
+            />
+            <el-icon v-else><UserFilled /></el-icon>
+            <span v-if="authStore.currentUser" />
+            <el-icon class="app-shell__avatar-caret"><ArrowDown /></el-icon>
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu class="app-shell__account-menu">
+              <el-dropdown-item v-if="authStore.currentUser" command="profile">
+                <el-icon><User /></el-icon>
+                个人主页
+              </el-dropdown-item>
+              <el-dropdown-item v-if="authStore.currentUser" command="publish">
+                <el-icon><EditPen /></el-icon>
+                发布内容
+              </el-dropdown-item>
+              <el-dropdown-item v-if="authStore.currentUser" divided command="logout">
+                <el-icon><SwitchButton /></el-icon>
+                退出登录
+              </el-dropdown-item>
+              <el-dropdown-item v-else command="login">
+                <el-icon><User /></el-icon>
+                登录 / 注册
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+
         <button type="button" class="app-shell__publish" @click="publish">
           <el-icon><Plus /></el-icon>
           发布
@@ -159,7 +194,7 @@ watch(
   inset: 0 0 auto 0;
   z-index: 90;
   display: grid;
-  grid-template-columns: 250px minmax(240px, 380px) minmax(500px, 1fr) auto;
+  grid-template-columns: 250px minmax(240px, 420px) minmax(360px, 1fr) auto;
   align-items: center;
   gap: 18px;
   height: 74px;
@@ -282,7 +317,7 @@ watch(
   display: flex;
   align-items: stretch;
   justify-content: center;
-  gap: 20px;
+  gap: 26px;
   min-width: 0;
   height: 100%;
 }
@@ -291,7 +326,6 @@ watch(
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
   padding: 0 2px;
   color: #161b27;
   font-size: 16px;
@@ -421,6 +455,11 @@ watch(
 .app-shell__main {
   min-height: 100vh;
   padding-top: 74px;
+}
+
+:deep(.app-shell__account-menu .el-dropdown-menu__item) {
+  gap: 8px;
+  min-width: 132px;
 }
 
 @media (max-width: 1360px) {
