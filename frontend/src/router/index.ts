@@ -3,8 +3,6 @@ import { useAuthStore } from '../stores/auth'
 
 const FeedView = () => import('../views/FeedView.vue')
 const LoginView = () => import('../views/LoginView.vue')
-const LiveRoomView = () => import('../views/LiveRoomView.vue')
-const LiveView = () => import('../views/LiveView.vue')
 const PostDetailView = () => import('../views/PostDetailView.vue')
 const ProfileView = () => import('../views/ProfileView.vue')
 const PublishView = () => import('../views/PublishView.vue')
@@ -26,16 +24,6 @@ const router = createRouter({
       path: '/feed',
       name: 'feed',
       component: FeedView,
-    },
-    {
-      path: '/live',
-      name: 'live',
-      component: LiveView,
-    },
-    {
-      path: '/live/:id',
-      name: 'live-room',
-      component: LiveRoomView,
     },
     {
       path: '/publish',

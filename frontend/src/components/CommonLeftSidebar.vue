@@ -8,7 +8,6 @@ import {
   Star,
   TrendCharts,
   UserFilled,
-  VideoPlay,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
@@ -29,9 +28,14 @@ const navItems = [
   { key: 'friends', label: '朋友', icon: UserFilled },
   { key: 'favorite', label: '收藏', icon: Star },
   { key: 'later', label: '稍后再看', icon: Clock },
-  { key: 'live', label: '直播', icon: VideoPlay, path: '/live', badge: 'LIVE' },
   { key: 'community', label: '社群', icon: Compass },
-]
+] satisfies Array<{
+  key: string
+  label: string
+  icon: typeof HomeFilled
+  path?: string
+  badge?: string
+}>
 
 const followedCommunities = [
   { name: '旅行日记', members: '26.5万成员', badge: '99+', avatar: 'https://picsum.photos/seed/sidebar-travel/80/80' },
@@ -43,7 +47,6 @@ const followedCommunities = [
 function isActive(itemPath?: string) {
   if (!itemPath) return false
   if (itemPath === '/feed') return route.path === '/feed' || route.path.startsWith('/posts/')
-  if (itemPath === '/live') return route.path.startsWith('/live')
   return route.path === itemPath
 }
 
@@ -73,7 +76,6 @@ function handleNav(item: (typeof navItems)[number]) {
       >
         <el-icon><component :is="item.icon" /></el-icon>
         <span>{{ item.label }}</span>
-        <em v-if="item.badge">{{ item.badge }}</em>
       </button>
     </nav>
 

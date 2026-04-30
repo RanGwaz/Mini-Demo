@@ -26,7 +26,6 @@ const navItems = [
   { key: 'discover', label: '发现' },
   { key: 'following', label: '关注' },
   { key: 'video', label: '视频', icon: VideoPlay },
-  { key: 'live', label: '直播', path: '/live' },
   { key: 'community', label: '社群' },
   { key: 'creator', label: '创作中心', path: '/publish' },
 ]
@@ -41,7 +40,6 @@ function handleDeveloping(name: string) {
 
 function isNavActive(item: (typeof navItems)[number]) {
   if (!item.path) return false
-  if (item.path === '/live') return route.path.startsWith('/live')
   if (item.path === '/publish') return route.path.startsWith('/publish')
   return route.path === item.path
 }
