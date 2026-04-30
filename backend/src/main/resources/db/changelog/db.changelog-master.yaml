@@ -1,0 +1,1188 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-init-schema
+      author: rangwaz
+      validCheckSum: ANY
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          indexExists:
+            tableName: posts
+            indexName: idx_posts_author_id
+      changes:
+        - sqlFile:
+            path: db/migration/V1__init_schema.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false
+
+  - changeSet:
+      id: 002-post-comments-reply-support
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: post_comments
+            columnName: parent_comment_id
+      changes:
+        - addColumn:
+            tableName: post_comments
+            columns:
+              - column:
+                  name: parent_comment_id
+                  type: BIGINT
+                  constraints:
+                    nullable: true
+        - createIndex:
+            tableName: post_comments
+            indexName: idx_post_comments_parent
+            columns:
+              - column:
+                  name: parent_comment_id
+
+  - changeSet:
+      id: 003-users-background-url
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: users
+            columnName: background_url
+      changes:
+        - addColumn:
+            tableName: users
+            columns:
+              - column:
+                  name: background_url
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: true
+
+  - changeSet:
+      id: 004-users-user-no
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: users
+            columnName: user_no
+      changes:
+        - addColumn:
+            tableName: users
+            columns:
+              - column:
+                  name: user_no
+                  type: VARCHAR(16)
+                  constraints:
+                    nullable: true
+
+  - changeSet:
+      id: 005-users-user-no-updated-at
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: users
+            columnName: user_no_updated_at
+      changes:
+        - addColumn:
+            tableName: users
+            columns:
+              - column:
+                  name: user_no_updated_at
+                  type: DATETIME
+                  constraints:
+                    nullable: true
+
+  - changeSet:
+      id: 006-users-phone-hash
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: users
+            columnName: phone_hash
+      changes:
+        - addColumn:
+            tableName: users
+            columns:
+              - column:
+                  name: phone_hash
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: true
+
+  - changeSet:
+      id: 007-users-phone-salt
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: users
+            columnName: phone_salt
+      changes:
+        - addColumn:
+            tableName: users
+            columns:
+              - column:
+                  name: phone_salt
+                  type: VARCHAR(32)
+                  constraints:
+                    nullable: true
+
+  - changeSet:
+      id: 008-users-last-login-at
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: users
+            columnName: last_login_at
+      changes:
+        - addColumn:
+            tableName: users
+            columns:
+              - column:
+                  name: last_login_at
+                  type: DATETIME
+                  constraints:
+                    nullable: true
+
+  - changeSet:
+      id: 009-users-login-ip
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: users
+            columnName: login_ip
+      changes:
+        - addColumn:
+            tableName: users
+            columns:
+              - column:
+                  name: login_ip
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: true
+
+  - changeSet:
+      id: 010-users-deleted
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: users
+            columnName: deleted
+      changes:
+        - addColumn:
+            tableName: users
+            columns:
+              - column:
+                  name: deleted
+                  type: TINYINT(1)
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 011-users-version
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: users
+            columnName: version
+      changes:
+        - addColumn:
+            tableName: users
+            columns:
+              - column:
+                  name: version
+                  type: INT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 012-users-idx-user-no
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          indexExists:
+            tableName: users
+            indexName: uk_users_user_no
+      changes:
+        - createIndex:
+            tableName: users
+            indexName: uk_users_user_no
+            unique: true
+            columns:
+              - column:
+                  name: user_no
+
+  - changeSet:
+      id: 013-users-idx-phone-hash
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          indexExists:
+            tableName: users
+            indexName: uk_users_phone_hash
+      changes:
+        - createIndex:
+            tableName: users
+            indexName: uk_users_phone_hash
+            unique: true
+            columns:
+              - column:
+                  name: phone_hash
+
+  - changeSet:
+      id: 014-users-idx-status-deleted
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          indexExists:
+            tableName: users
+            indexName: idx_users_status_deleted
+      changes:
+        - createIndex:
+            tableName: users
+            indexName: idx_users_status_deleted
+            columns:
+              - column:
+                  name: status
+              - column:
+                  name: deleted
+
+  - changeSet:
+      id: 015-users-idx-last-login-at
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          indexExists:
+            tableName: users
+            indexName: idx_users_last_login_at
+      changes:
+        - createIndex:
+            tableName: users
+            indexName: idx_users_last_login_at
+            columns:
+              - column:
+                  name: last_login_at
+
+  - changeSet:
+      id: 016-create-user-oauth
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          tableExists:
+            tableName: user_oauth
+      changes:
+        - createTable:
+            tableName: user_oauth
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: user_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: provider
+                  type: VARCHAR(32)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: open_id
+                  type: VARCHAR(128)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: union_id
+                  type: VARCHAR(128)
+                  constraints:
+                    nullable: true
+              - column:
+                  name: access_token
+                  type: VARCHAR(512)
+                  constraints:
+                    nullable: true
+              - column:
+                  name: expires_at
+                  type: DATETIME
+                  constraints:
+                    nullable: true
+              - column:
+                  name: raw_info
+                  type: TEXT
+                  constraints:
+                    nullable: true
+              - column:
+                  name: deleted
+                  type: TINYINT(1)
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: version
+                  type: INT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: DATETIME
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: DATETIME
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false
+        - createIndex:
+            tableName: user_oauth
+            indexName: uk_oauth_provider_openid
+            unique: true
+            columns:
+              - column:
+                  name: provider
+              - column:
+                  name: open_id
+        - createIndex:
+            tableName: user_oauth
+            indexName: idx_oauth_user_id
+            columns:
+              - column:
+                  name: user_id
+
+  - changeSet:
+      id: 017-drop-fk-posts-author
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        foreignKeyConstraintExists:
+          foreignKeyName: fk_posts_author
+          foreignKeyTableName: posts
+      changes:
+        - dropForeignKeyConstraint:
+            baseTableName: posts
+            constraintName: fk_posts_author
+
+  - changeSet:
+      id: 018-drop-fk-post-assets-post
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        foreignKeyConstraintExists:
+          foreignKeyName: fk_post_assets_post
+          foreignKeyTableName: post_assets
+      changes:
+        - dropForeignKeyConstraint:
+            baseTableName: post_assets
+            constraintName: fk_post_assets_post
+
+  - changeSet:
+      id: 019-drop-fk-user-follows-follower
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        foreignKeyConstraintExists:
+          foreignKeyName: fk_user_follows_follower
+          foreignKeyTableName: user_follows
+      changes:
+        - dropForeignKeyConstraint:
+            baseTableName: user_follows
+            constraintName: fk_user_follows_follower
+
+  - changeSet:
+      id: 020-drop-fk-user-follows-followed
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        foreignKeyConstraintExists:
+          foreignKeyName: fk_user_follows_followed
+          foreignKeyTableName: user_follows
+      changes:
+        - dropForeignKeyConstraint:
+            baseTableName: user_follows
+            constraintName: fk_user_follows_followed
+
+  - changeSet:
+      id: 021-drop-fk-post-likes-user
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        foreignKeyConstraintExists:
+          foreignKeyName: fk_post_likes_user
+          foreignKeyTableName: post_likes
+      changes:
+        - dropForeignKeyConstraint:
+            baseTableName: post_likes
+            constraintName: fk_post_likes_user
+
+  - changeSet:
+      id: 022-drop-fk-post-likes-post
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        foreignKeyConstraintExists:
+          foreignKeyName: fk_post_likes_post
+          foreignKeyTableName: post_likes
+      changes:
+        - dropForeignKeyConstraint:
+            baseTableName: post_likes
+            constraintName: fk_post_likes_post
+
+  - changeSet:
+      id: 023-drop-fk-post-favorites-user
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        foreignKeyConstraintExists:
+          foreignKeyName: fk_post_favorites_user
+          foreignKeyTableName: post_favorites
+      changes:
+        - dropForeignKeyConstraint:
+            baseTableName: post_favorites
+            constraintName: fk_post_favorites_user
+
+  - changeSet:
+      id: 024-drop-fk-post-favorites-post
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        foreignKeyConstraintExists:
+          foreignKeyName: fk_post_favorites_post
+          foreignKeyTableName: post_favorites
+      changes:
+        - dropForeignKeyConstraint:
+            baseTableName: post_favorites
+            constraintName: fk_post_favorites_post
+
+  - changeSet:
+      id: 025-drop-fk-post-comments-user
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        foreignKeyConstraintExists:
+          foreignKeyName: fk_post_comments_user
+          foreignKeyTableName: post_comments
+      changes:
+        - dropForeignKeyConstraint:
+            baseTableName: post_comments
+            constraintName: fk_post_comments_user
+
+  - changeSet:
+      id: 026-drop-fk-post-comments-post
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        foreignKeyConstraintExists:
+          foreignKeyName: fk_post_comments_post
+          foreignKeyTableName: post_comments
+      changes:
+        - dropForeignKeyConstraint:
+            baseTableName: post_comments
+            constraintName: fk_post_comments_post
+
+  - changeSet:
+      id: 027-drop-fk-user-blocks-user
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        foreignKeyConstraintExists:
+          foreignKeyName: fk_user_blocks_user
+          foreignKeyTableName: user_blocks
+      changes:
+        - dropForeignKeyConstraint:
+            baseTableName: user_blocks
+            constraintName: fk_user_blocks_user
+
+  - changeSet:
+      id: 028-drop-fk-user-blocks-target
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        foreignKeyConstraintExists:
+          foreignKeyName: fk_user_blocks_target
+          foreignKeyTableName: user_blocks
+      changes:
+        - dropForeignKeyConstraint:
+            baseTableName: user_blocks
+            constraintName: fk_user_blocks_target
+
+  - changeSet:
+      id: 029-drop-fk-neg-feedback-user
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        foreignKeyConstraintExists:
+          foreignKeyName: fk_post_negative_feedbacks_user
+          foreignKeyTableName: post_negative_feedbacks
+      changes:
+        - dropForeignKeyConstraint:
+            baseTableName: post_negative_feedbacks
+            constraintName: fk_post_negative_feedbacks_user
+
+  - changeSet:
+      id: 030-drop-fk-neg-feedback-post
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        foreignKeyConstraintExists:
+          foreignKeyName: fk_post_negative_feedbacks_post
+          foreignKeyTableName: post_negative_feedbacks
+      changes:
+        - dropForeignKeyConstraint:
+            baseTableName: post_negative_feedbacks
+            constraintName: fk_post_negative_feedbacks_post
+
+  - changeSet:
+      id: 031-drop-fk-content-reports-user
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        foreignKeyConstraintExists:
+          foreignKeyName: fk_content_reports_user
+          foreignKeyTableName: content_reports
+      changes:
+        - dropForeignKeyConstraint:
+            baseTableName: content_reports
+            constraintName: fk_content_reports_user
+
+  - changeSet:
+      id: 032-drop-fk-content-reports-post
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        foreignKeyConstraintExists:
+          foreignKeyName: fk_content_reports_post
+          foreignKeyTableName: content_reports
+      changes:
+        - dropForeignKeyConstraint:
+            baseTableName: content_reports
+            constraintName: fk_content_reports_post
+
+  - changeSet:
+      id: 033-posts-deleted-version
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: posts
+            columnName: deleted
+      changes:
+        - addColumn:
+            tableName: posts
+            columns:
+              - column:
+                  name: deleted
+                  type: TINYINT(1)
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: version
+                  type: INT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 034-posts-idx-author-deleted
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          indexExists:
+            tableName: posts
+            indexName: idx_posts_author_deleted
+      changes:
+        - createIndex:
+            tableName: posts
+            indexName: idx_posts_author_deleted
+            columns:
+              - column:
+                  name: author_id
+              - column:
+                  name: deleted
+
+  - changeSet:
+      id: 035-post-assets-deleted-version
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: post_assets
+            columnName: deleted
+      changes:
+        - addColumn:
+            tableName: post_assets
+            columns:
+              - column:
+                  name: deleted
+                  type: TINYINT(1)
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: version
+                  type: INT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 036-user-follows-deleted-version
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: user_follows
+            columnName: deleted
+      changes:
+        - addColumn:
+            tableName: user_follows
+            columns:
+              - column:
+                  name: deleted
+                  type: TINYINT(1)
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: version
+                  type: INT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 037-user-follows-idx-followed
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          indexExists:
+            tableName: user_follows
+            indexName: idx_user_follows_followed_id
+      changes:
+        - createIndex:
+            tableName: user_follows
+            indexName: idx_user_follows_followed_id
+            columns:
+              - column:
+                  name: followed_id
+
+  - changeSet:
+      id: 038-post-likes-deleted-version
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: post_likes
+            columnName: deleted
+      changes:
+        - addColumn:
+            tableName: post_likes
+            columns:
+              - column:
+                  name: deleted
+                  type: TINYINT(1)
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: version
+                  type: INT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 039-post-favorites-deleted-version
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: post_favorites
+            columnName: deleted
+      changes:
+        - addColumn:
+            tableName: post_favorites
+            columns:
+              - column:
+                  name: deleted
+                  type: TINYINT(1)
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: version
+                  type: INT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 040-post-comments-deleted-version
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: post_comments
+            columnName: deleted
+      changes:
+        - addColumn:
+            tableName: post_comments
+            columns:
+              - column:
+                  name: deleted
+                  type: TINYINT(1)
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: version
+                  type: INT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 041-user-blocks-deleted-version
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: user_blocks
+            columnName: deleted
+      changes:
+        - addColumn:
+            tableName: user_blocks
+            columns:
+              - column:
+                  name: deleted
+                  type: TINYINT(1)
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: version
+                  type: INT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 042-neg-feedbacks-deleted-version
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: post_negative_feedbacks
+            columnName: deleted
+      changes:
+        - addColumn:
+            tableName: post_negative_feedbacks
+            columns:
+              - column:
+                  name: deleted
+                  type: TINYINT(1)
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: version
+                  type: INT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 043-content-reports-deleted-version
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: content_reports
+            columnName: deleted
+      changes:
+        - addColumn:
+            tableName: content_reports
+            columns:
+              - column:
+                  name: deleted
+                  type: TINYINT(1)
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: version
+                  type: INT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+
+  - include:
+      file: db/changelog/db.changelog-feature-engineering.yaml
+      relativeToChangelogFile: false
+
+  - changeSet:
+      id: 044-user-events-idx-type-target
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          indexExists:
+            tableName: user_events
+            indexName: idx_user_events_type_target
+      changes:
+        - createIndex:
+            tableName: user_events
+            indexName: idx_user_events_type_target
+            columns:
+              - column:
+                  name: event_type
+              - column:
+                  name: target_type
+              - column:
+                  name: target_id
+
+  - changeSet:
+      id: 045-posts-thumb-url
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: posts
+            columnName: thumb_url
+      changes:
+        - addColumn:
+            tableName: posts
+            columns:
+              - column:
+                  name: thumb_url
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: true
+
+  - changeSet:
+      id: 046-post-assets-thumb-and-size
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: post_assets
+            columnName: thumb_url
+      changes:
+        - addColumn:
+            tableName: post_assets
+            columns:
+              - column:
+                  name: thumb_url
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: true
+              - column:
+                  name: width
+                  type: INT
+                  constraints:
+                    nullable: true
+              - column:
+                  name: height
+                  type: INT
+                  constraints:
+                    nullable: true
+
+  - changeSet:
+      id: 047-posts-feed-accelerate-indexes
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          indexExists:
+            tableName: posts
+            indexName: idx_posts_feed_visibility_status_author_created
+      changes:
+        - createIndex:
+            tableName: posts
+            indexName: idx_posts_feed_visibility_status_author_created
+            columns:
+              - column:
+                  name: visibility
+              - column:
+                  name: audit_status
+              - column:
+                  name: author_id
+              - column:
+                  name: created_at
+        - createIndex:
+            tableName: posts
+            indexName: idx_posts_feed_visibility_status_hot_created
+            columns:
+              - column:
+                  name: visibility
+              - column:
+                  name: audit_status
+              - column:
+                  name: hot_score
+              - column:
+                  name: created_at
+
+  - changeSet:
+      id: 048-posts-view-count-bigint
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        sqlCheck:
+          expectedResult: "0"
+          sql: >
+            SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'posts'
+              AND COLUMN_NAME = 'view_count'
+              AND DATA_TYPE = 'bigint'
+      changes:
+        - modifyDataType:
+            tableName: posts
+            columnName: view_count
+            newDataType: BIGINT
+
+  - changeSet:
+      id: 049-recommendation-semantic-upgrade
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: posts
+            columnName: topic_path
+      changes:
+        - sqlFile:
+            path: db/migration/V3__recommendation_semantic_upgrade.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false
+
+  - changeSet:
+      id: 050-user-interest-subscriptions
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          tableExists:
+            tableName: user_interest_subscriptions
+      changes:
+        - createTable:
+            tableName: user_interest_subscriptions
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: user_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: facet_type
+                  type: VARCHAR(32)
+                  defaultValue: TOPIC
+                  constraints:
+                    nullable: false
+              - column:
+                  name: facet_key
+                  type: VARCHAR(128)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: facet_label
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: true
+              - column:
+                  name: weight
+                  type: DECIMAL(8,4)
+                  defaultValueNumeric: 1
+                  constraints:
+                    nullable: false
+              - column:
+                  name: source
+                  type: VARCHAR(32)
+                  defaultValue: MANUAL
+                  constraints:
+                    nullable: false
+              - column:
+                  name: status
+                  type: VARCHAR(32)
+                  defaultValue: ACTIVE
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: DATETIME
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: DATETIME
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false
+        - createIndex:
+            tableName: user_interest_subscriptions
+            indexName: uk_user_interest_subscriptions_user_type_key
+            unique: true
+            columns:
+              - column:
+                  name: user_id
+              - column:
+                  name: facet_type
+              - column:
+                  name: facet_key
+        - createIndex:
+            tableName: user_interest_subscriptions
+            indexName: idx_user_interest_subscriptions_user_status
+            columns:
+              - column:
+                  name: user_id
+              - column:
+                  name: status
+              - column:
+                  name: updated_at
+        - createIndex:
+            tableName: user_interest_subscriptions
+            indexName: idx_user_interest_subscriptions_facet
+            columns:
+              - column:
+                  name: facet_type
+              - column:
+                  name: facet_key
+
+  - changeSet:
+      id: 051-user-events-train-indexes
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          indexExists:
+            tableName: user_events
+            indexName: idx_user_events_user_target_created
+      changes:
+        - createIndex:
+            tableName: user_events
+            indexName: idx_user_events_user_target_created
+            columns:
+              - column:
+                  name: user_id
+              - column:
+                  name: target_type
+              - column:
+                  name: created_at
+        - createIndex:
+            tableName: user_events
+            indexName: idx_user_events_target_event_created
+            columns:
+              - column:
+                  name: target_type
+              - column:
+                  name: event_type
+              - column:
+                  name: created_at
+
+  - changeSet:
+      id: 052-posts-facet-accelerate-index
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          indexExists:
+            tableName: posts
+            indexName: idx_posts_topic_subtopic_status_created
+      changes:
+        - createIndex:
+            tableName: posts
+            indexName: idx_posts_topic_subtopic_status_created
+            columns:
+              - column:
+                  name: topic_cluster_key
+              - column:
+                  name: subtopic_cluster_key
+              - column:
+                  name: visibility
+              - column:
+                  name: audit_status
+              - column:
+                  name: created_at
+
+  - changeSet:
+      id: 053-post-i2i-neighbors
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          tableExists:
+            tableName: post_i2i_neighbors
+      changes:
+        - sqlFile:
+            path: db/migration/V4__post_i2i_neighbors.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false
+
+  - changeSet:
+      id: 054-recommendation-tag-dictionary
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          tableExists:
+            tableName: recommendation_tag_dictionary
+      changes:
+        - sqlFile:
+            path: db/migration/V5__recommendation_tag_dictionary.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

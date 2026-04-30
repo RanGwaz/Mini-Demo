@@ -1,0 +1,220 @@
+databaseChangeLog:
+  # ===========================================================
+  # 特征工程基础表：为推荐系统提供离线特征存储
+  # 注意：不修改任何现有表，仅新增特征表
+  # ===========================================================
+
+  - changeSet:
+      id: 045-create-user-features
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          tableExists:
+            tableName: user_features
+      changes:
+        - createTable:
+            tableName: user_features
+            remarks: '用户离线特征表，由 Python 离线脚本定期计算写入'
+            columns:
+              - column:
+                  name: user_id
+                  type: BIGINT
+                  remarks: '用户ID，对应 users.id'
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: register_days
+                  type: INT
+                  remarks: '注册天数'
+                  constraints:
+                    nullable: true
+              - column:
+                  name: total_posts
+                  type: INT
+                  defaultValueNumeric: 0
+                  remarks: '总发帖数'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: total_likes_given
+                  type: INT
+                  defaultValueNumeric: 0
+                  remarks: '总点赞数（用户主动给出的）'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: total_favorites_given
+                  type: INT
+                  defaultValueNumeric: 0
+                  remarks: '总收藏数'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: total_comments_given
+                  type: INT
+                  defaultValueNumeric: 0
+                  remarks: '总评论数'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: total_followers
+                  type: INT
+                  defaultValueNumeric: 0
+                  remarks: '粉丝数'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: total_following
+                  type: INT
+                  defaultValueNumeric: 0
+                  remarks: '关注数'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: avg_weekly_likes
+                  type: DECIMAL(10,2)
+                  defaultValueNumeric: 0
+                  remarks: '近7天日均点赞'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: avg_weekly_favorites
+                  type: DECIMAL(10,2)
+                  defaultValueNumeric: 0
+                  remarks: '近7天日均收藏'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: top_interest_tags
+                  type: VARCHAR(512)
+                  remarks: '用户最感兴趣的标签（逗号分隔，top5），从用户互动帖子标签统计'
+                  constraints:
+                    nullable: true
+              - column:
+                  name: feature_json
+                  type: TEXT
+                  remarks: '其他复杂特征的 JSON 扩展字段'
+                  constraints:
+                    nullable: true
+              - column:
+                  name: updated_at
+                  type: DATETIME
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  remarks: '最后更新时间'
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 046-create-post-features
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          tableExists:
+            tableName: post_features
+      changes:
+        - createTable:
+            tableName: post_features
+            remarks: '帖子离线特征表，由 Python 离线脚本定期计算写入'
+            columns:
+              - column:
+                  name: post_id
+                  type: BIGINT
+                  remarks: '帖子ID，对应 posts.id'
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: author_id
+                  type: BIGINT
+                  remarks: '作者ID'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: publish_hour
+                  type: TINYINT
+                  remarks: '发布时间（小时 0-23）'
+                  constraints:
+                    nullable: true
+              - column:
+                  name: publish_day_of_week
+                  type: TINYINT
+                  remarks: '发布星期几（0=周一 6=周日）'
+                  constraints:
+                    nullable: true
+              - column:
+                  name: hot_score
+                  type: DECIMAL(16,4)
+                  defaultValueNumeric: 0
+                  remarks: '热度分（从 posts.hot_score 同步）'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: view_count
+                  type: BIGINT
+                  defaultValueNumeric: 0
+                  remarks: '浏览量'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: like_count
+                  type: INT
+                  defaultValueNumeric: 0
+                  remarks: '点赞数'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: favorite_count
+                  type: INT
+                  defaultValueNumeric: 0
+                  remarks: '收藏数'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: comment_count
+                  type: INT
+                  defaultValueNumeric: 0
+                  remarks: '评论数'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: tags
+                  type: VARCHAR(255)
+                  remarks: '标签（逗号分隔，从 posts.tags 同步）'
+                  constraints:
+                    nullable: true
+              - column:
+                  name: author_fans_count
+                  type: INT
+                  defaultValueNumeric: 0
+                  remarks: '作者粉丝数'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: author_avg_hot_score
+                  type: DECIMAL(10,2)
+                  defaultValueNumeric: 0
+                  remarks: '作者历史帖子平均热度分（衡量作者质量）'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: DATETIME
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  remarks: '最后更新时间'
+                  constraints:
+                    nullable: false
+        - createIndex:
+            tableName: post_features
+            indexName: idx_post_features_author_id
+            columns:
+              - column:
+                  name: author_id
+        - createIndex:
+            tableName: post_features
+            indexName: idx_post_features_hot_score
+            columns:
+              - column:
+                  name: hot_score

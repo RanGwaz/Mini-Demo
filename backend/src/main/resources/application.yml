@@ -1,0 +1,150 @@
+spring:
+  application:
+    name: image-social-platform
+  profiles:
+    active: local
+  datasource:
+    url: jdbc:mysql://localhost:3306/image_social?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: root
+    password: root123456
+    hikari:
+      maximum-pool-size: 16
+      minimum-idle: 4
+      connection-timeout: 3000
+      validation-timeout: 1000
+      idle-timeout: 600000
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+      timeout: 800ms
+      connect-timeout: 800ms
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 50MB
+  kafka:
+    bootstrap-servers: localhost:9094
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    consumer:
+      group-id: image-social-platform
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "*"
+  jackson:
+    default-property-inclusion: non_null
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: auto
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  health:
+    elasticsearch:
+      enabled: false
+
+jwt:
+  issuer: image-social-platform
+  secret: ChangeThisSecretForLocalDevOnly1234567890
+  access-token-expire-seconds: 86400
+
+app:
+  minio:
+    endpoint: http://localhost:9000
+    access-key: minioadmin
+    secret-key: minioadmin
+    bucket: image-social-dev
+    public-endpoint: http://localhost:9000
+  kafka:
+    enabled: ${APP_KAFKA_ENABLED:false}
+    topics:
+      user-events: user-events
+      search-sync: search-sync
+  elasticsearch:
+    enabled: false
+    endpoint: http://localhost:9200
+  recommendation:
+    deep-rank:
+      enabled: ${DEEP_RANK_ENABLED:true}
+      endpoint: ${DEEP_RANK_ENDPOINT:http://localhost:18080/infer/rank}
+      recall-endpoint: ${DEEP_RECALL_ENDPOINT:http://localhost:18080/infer/recall}
+      timeout-ms: ${DEEP_RANK_TIMEOUT_MS:1200}
+      auth-token: ${DEEP_RANK_AUTH_TOKEN:}
+    online-interest:
+      decay-enabled: ${ONLINE_INTEREST_DECAY_ENABLED:true}
+      decay-interval-minutes: ${ONLINE_INTEREST_DECAY_INTERVAL_MINUTES:10}
+      half-life-hours: ${ONLINE_INTEREST_HALF_LIFE_HOURS:18}
+      expire-days: ${ONLINE_INTEREST_EXPIRE_DAYS:3}
+      zset-max-size: ${ONLINE_INTEREST_ZSET_MAX_SIZE:160}
+      fetch-window: ${ONLINE_INTEREST_FETCH_WINDOW:56}
+      min-score: ${ONLINE_INTEREST_MIN_SCORE:0.12}
+    feed-quota:
+      experiment-name: ${RECO_FEED_QUOTA_EXPERIMENT:feed_quota_home_v1}
+      ab-enabled: ${RECO_FEED_QUOTA_AB_ENABLED:true}
+      treatment-ratio: ${RECO_FEED_QUOTA_TREATMENT_RATIO:0.50}
+      min-source-quota: ${RECO_FEED_QUOTA_MIN_SOURCE_QUOTA:18}
+      fetch-multiplier: ${RECO_FEED_QUOTA_FETCH_MULTIPLIER:2}
+      force-control: ${RECO_FEED_QUOTA_FORCE_CONTROL:false}
+      guard-enabled: ${RECO_FEED_QUOTA_GUARD_ENABLED:true}
+      guard-window-days: ${RECO_FEED_QUOTA_GUARD_WINDOW_DAYS:3}
+      guard-min-exposure: ${RECO_FEED_QUOTA_GUARD_MIN_EXPOSURE:1200}
+      guard-max-ctr-drop: ${RECO_FEED_QUOTA_GUARD_MAX_CTR_DROP:0.12}
+      guard-max-negative-lift: ${RECO_FEED_QUOTA_GUARD_MAX_NEGATIVE_LIFT:0.25}
+      guard-cache-seconds: ${RECO_FEED_QUOTA_GUARD_CACHE_SECONDS:90}
+      anonymous:
+        hot: ${RECO_FEED_QUOTA_ANON_HOT:0.62}
+        social: 0.0
+        content: 0.0
+        online: 0.0
+        recent-positive: 0.0
+        vector: 0.0
+        explicit: 0.0
+        explore: ${RECO_FEED_QUOTA_ANON_EXPLORE:0.38}
+      control:
+        hot: ${RECO_FEED_QUOTA_A_HOT:0.10}
+        social: ${RECO_FEED_QUOTA_A_SOCIAL:0.10}
+        content: ${RECO_FEED_QUOTA_A_CONTENT:0.16}
+        online: ${RECO_FEED_QUOTA_A_ONLINE:0.18}
+        recent-positive: ${RECO_FEED_QUOTA_A_RECENT_POSITIVE:0.18}
+        vector: ${RECO_FEED_QUOTA_A_VECTOR:0.15}
+        explicit: ${RECO_FEED_QUOTA_A_EXPLICIT:0.07}
+        explore: ${RECO_FEED_QUOTA_A_EXPLORE:0.06}
+      treatment:
+        hot: ${RECO_FEED_QUOTA_B_HOT:0.08}
+        social: ${RECO_FEED_QUOTA_B_SOCIAL:0.08}
+        content: ${RECO_FEED_QUOTA_B_CONTENT:0.14}
+        online: ${RECO_FEED_QUOTA_B_ONLINE:0.24}
+        recent-positive: ${RECO_FEED_QUOTA_B_RECENT_POSITIVE:0.20}
+        vector: ${RECO_FEED_QUOTA_B_VECTOR:0.18}
+        explicit: ${RECO_FEED_QUOTA_B_EXPLICIT:0.05}
+        explore: ${RECO_FEED_QUOTA_B_EXPLORE:0.03}
+      similar:
+        vector: ${RECO_SIMILAR_QUOTA_VECTOR:0.58}
+        semantic: ${RECO_SIMILAR_QUOTA_SEMANTIC:0.27}
+        fallback: ${RECO_SIMILAR_QUOTA_FALLBACK:0.15}
+    online-metrics:
+      default-window-days: ${RECO_ONLINE_METRICS_DAYS:3}
+      max-window-days: ${RECO_ONLINE_METRICS_MAX_DAYS:30}
+      top-sources-limit: ${RECO_ONLINE_METRICS_TOP_SOURCES:8}
+      top-experiments-limit: ${RECO_ONLINE_METRICS_TOP_EXPERIMENTS:6}
+      attribution-hours: ${RECO_ONLINE_METRICS_ATTRIBUTION_HOURS:24}

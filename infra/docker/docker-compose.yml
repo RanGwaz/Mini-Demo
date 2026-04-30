@@ -1,0 +1,431 @@
+services:
+  mysql:
+    image: mysql:8.0.39
+    container_name: image-social-mysql
+    profiles: ["core"]
+    environment:
+      MYSQL_ROOT_PASSWORD: root123456
+      MYSQL_DATABASE: image_social
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-proot123456"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: image-social-redis
+    profiles: ["core"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./data/redis:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    container_name: image-social-minio
+    profiles: ["core", "feature"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ./data/minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: image-social-minio-init
+    profiles: ["core", "feature"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/image-social-dev &&
+      mc anonymous set public local/image-social-dev
+      "
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.3
+    container_name: image-social-elasticsearch
+    profiles: ["search"]
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms384m -Xmx384m
+    ports:
+      - "9200:9200"
+    volumes:
+      - ./data/elasticsearch:/usr/share/elasticsearch/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -fsSL http://localhost:9200 >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.14.3
+    container_name: image-social-kibana
+    profiles: ["search"]
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      XPACK_SECURITY_ENABLED: "false"
+    ports:
+      - "5601:5601"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: image-social-kafka
+    profiles: ["stream"]
+    ports:
+      - "9094:9094"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://kafka:9092,CONTROLLER://kafka:9093,PLAINTEXT_HOST://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    volumes:
+      - ./data/kafka:/var/lib/kafka/data
+    healthcheck:
+      disable: true
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: image-social-kafka-init
+    profiles: ["stream"]
+    depends_on:
+      kafka:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      for i in $$(seq 1 40); do
+        kafka-topics --bootstrap-server kafka:9092 --list >/dev/null 2>&1 && break;
+        sleep 3;
+      done &&
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic user-events --partitions 3 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic search-sync --partitions 3 --replication-factor 1
+      "
+
+  milvus:
+    image: milvusdb/milvus:v2.4.6
+    container_name: image-social-milvus
+    profiles: ["feature"]
+    command: milvus run standalone
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: minioadmin
+      MINIO_SECRET_ACCESS_KEY: minioadmin
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - ./data/milvus:/var/lib/milvus
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    # 内存限制：Milvus standalone 最低需要 ~2GB，建议 4GB
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+        reservations:
+          memory: 2g
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+
+  attu:
+    image: zilliz/attu:latest
+    container_name: image-social-attu
+    profiles: ["feature"]
+    ports:
+      - "8000:3000"
+    depends_on:
+      milvus:
+        condition: service_healthy
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: image-social-etcd
+    profiles: ["feature"]
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    ports:
+      - "2379:2379"
+    volumes:
+      - ./data/etcd:/etcd
+    # 关键修复：advertise-client-urls 必须用容器内可路由地址（0.0.0.0 或容器名）
+    # 用 127.0.0.1 会导致 Milvus 连接 etcd 失败，容器秒退
+    command: >
+      etcd
+      --data-dir=/etcd
+      --listen-client-urls=http://0.0.0.0:2379
+      --advertise-client-urls=http://etcd:2379
+      --listen-peer-urls=http://0.0.0.0:2380
+      --initial-advertise-peer-urls=http://etcd:2380
+      --initial-cluster=default=http://etcd:2380
+      --initial-cluster-token=etcd-cluster
+      --initial-cluster-state=new
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  feature-engineering-scheduler:
+    image: python:3.11-slim
+    container_name: image-social-feature-engineering-scheduler
+    profiles: ["feature"]
+    working_dir: /app/scripts
+    volumes:
+      - ../../backend/scripts:/app/scripts
+      - ./data/reco-jobs:/app/logs
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root123456
+      MYSQL_DATABASE: image_social
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      /bin/sh -c "
+      pip install --no-cache-dir -r requirements-reco-jobs.txt &&
+      while true; do
+        echo \"[$$(date '+%Y-%m-%d %H:%M:%S')] run feature_engineering.py\" | tee -a /app/logs/feature_engineering.log;
+        python feature_engineering.py 2>&1 | tee -a /app/logs/feature_engineering.log;
+        sleep 300;
+      done
+      "
+
+  embedding-extract-scheduler:
+    image: python:3.11-slim
+    container_name: image-social-embedding-extract-scheduler
+    profiles: ["feature"]
+    working_dir: /app/scripts
+    volumes:
+      - ../../backend/scripts:/app/scripts
+      - ./data/reco-jobs:/app/logs
+      - ./data/hf-cache:/root/.cache/huggingface
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root123456
+      MYSQL_DATABASE: image_social
+      MILVUS_HOST: milvus
+      MILVUS_PORT: 19530
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+    command: >
+      /bin/sh -c "
+      pip install --no-cache-dir -r requirements-reco-jobs.txt &&
+      while true; do
+        echo \"[$$(date '+%Y-%m-%d %H:%M:%S')] run extract_image_embeddings.py\" | tee -a /app/logs/extract_image_embeddings.log;
+        python extract_image_embeddings.py 2>&1 | tee -a /app/logs/extract_image_embeddings.log;
+        sleep 1800;
+      done
+      "
+
+  i2i-neighbor-scheduler:
+    image: python:3.11-slim
+    container_name: image-social-i2i-neighbor-scheduler
+    profiles: ["feature"]
+    working_dir: /app/scripts
+    volumes:
+      - ../../backend/scripts:/app/scripts
+      - ./data/reco-jobs:/app/logs
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root123456
+      MYSQL_DATABASE: image_social
+      I2I_LOOKBACK_DAYS: 30
+      I2I_TOP_N: 100
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: >
+      /bin/sh -c "
+      pip install --no-cache-dir -r requirements-reco-jobs.txt &&
+      while true; do
+        echo \"[$$(date '+%Y-%m-%d %H:%M:%S')] run build_i2i_neighbors.py\" | tee -a /app/logs/build_i2i_neighbors.log;
+        python build_i2i_neighbors.py 2>&1 | tee -a /app/logs/build_i2i_neighbors.log;
+        sleep 3600;
+      done
+      "
+
+  user-embedding-scheduler:
+    image: python:3.11-slim
+    container_name: image-social-user-embedding-scheduler
+    profiles: ["feature"]
+    working_dir: /app/rank
+    volumes:
+      - ./deep-rank-service:/app/rank
+      - ./models:/models
+      - ./data/reco-jobs:/app/logs
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root123456
+      MYSQL_DATABASE: image_social
+      MILVUS_HOST: milvus
+      MILVUS_PORT: 19530
+      MILVUS_COLLECTION: post_embeddings
+      MILVUS_USER_COLLECTION: user_embeddings
+      ACTIVE_USER_HOURS: 6
+      USER_EMBEDDING_SCOPE: auto
+      CANDIDATE_MODEL_PATH: /models/candidate_generator.pt
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+    command: >
+      /bin/sh -c "
+      pip install --no-cache-dir --default-timeout=300 --retries=10 -i https://pypi.tuna.tsinghua.edu.cn/simple --extra-index-url https://download.pytorch.org/whl/cu126 -r requirements.txt &&
+      while true; do
+        echo \"[$$(date '+%Y-%m-%d %H:%M:%S')] run build_user_embeddings.py\" | tee -a /app/logs/build_user_embeddings.log;
+        python build_user_embeddings.py 2>&1 | tee -a /app/logs/build_user_embeddings.log;
+        sleep 900;
+      done
+      "
+
+  semantic-taxonomy-scheduler:
+    image: python:3.11-slim
+    container_name: image-social-semantic-taxonomy-scheduler
+    profiles: ["feature"]
+    working_dir: /app/scripts
+    volumes:
+      - ../../backend/scripts:/app/scripts
+      - ./models:/models
+      - ./data/reco-jobs:/app/logs
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root123456
+      MYSQL_DATABASE: image_social
+      MILVUS_HOST: milvus
+      MILVUS_PORT: 19530
+      MILVUS_COLLECTION: post_embeddings
+      TAG_VOCAB_OUT: /models/tag_vocabulary.json
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+    command: >
+      /bin/sh -c "
+      pip install --no-cache-dir -r requirements-reco-jobs.txt &&
+      while true; do
+        echo \"[$$(date '+%Y-%m-%d %H:%M:%S')] run build_post_semantics.py\" | tee -a /app/logs/semantic_taxonomy.log;
+        python build_post_semantics.py 2>&1 | tee -a /app/logs/semantic_taxonomy.log;
+        echo \"[$$(date '+%Y-%m-%d %H:%M:%S')] run build_tag_vocabulary.py\" | tee -a /app/logs/semantic_taxonomy.log;
+        python build_tag_vocabulary.py 2>&1 | tee -a /app/logs/semantic_taxonomy.log;
+        sleep 86400;
+      done
+      "
+
+  deep-rank-service:
+    build:
+      context: ./deep-rank-service
+      dockerfile: Dockerfile
+    container_name: image-social-deep-rank-service
+    profiles: ["feature"]
+    ports:
+      - "18080:18080"
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root123456
+      MYSQL_DATABASE: image_social
+      MILVUS_HOST: milvus
+      MILVUS_PORT: 19530
+      MILVUS_COLLECTION: post_embeddings
+      RANK_MODEL_PATH: /models/deep_rank.pt
+      MAX_USER_HISTORY: 50
+    volumes:
+      - ./models:/models
+    depends_on:
+      mysql:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:18080/healthz')"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
