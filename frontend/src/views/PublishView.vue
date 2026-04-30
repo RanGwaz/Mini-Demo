@@ -3,13 +3,11 @@ defineOptions({ name: 'PublishView' })
 
 import {
   ArrowLeft,
-  Calendar,
   ChatLineRound,
   Check,
   CircleCheck,
-  Clock,
+  Close,
   Document,
-  Location,
   MagicStick,
   MoreFilled,
   Picture,
@@ -20,8 +18,6 @@ import {
   Share,
   Star,
   UploadFilled,
-  User,
-  VideoCamera,
   Warning,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
@@ -31,7 +27,7 @@ import { api } from '../services/api'
 import { useAuthStore } from '../stores/auth'
 import type { UploadResponse } from '../types'
 
-type PublishKind = 'image' | 'short' | 'long' | 'live' | 'topic'
+type PublishKind = 'text' | 'image'
 type PreviewMode = 'desktop' | 'mobile'
 
 const router = useRouter()
@@ -41,80 +37,101 @@ authStore.hydrate()
 const loading = ref(false)
 const saving = ref(false)
 const uploading = ref(false)
-const selectedKind = ref<PublishKind>('image')
+const selectedKind = ref<PublishKind>('text')
 const previewMode = ref<PreviewMode>('desktop')
-const selectedCoverId = ref('sample-1')
 const uploadedAssets = ref<UploadResponse[]>([])
+const customTag = ref('')
 const visibility = ref('公开 - 所有人可见')
-const publishMode = ref<'now' | 'schedule'>('now')
-const scheduledAt = ref('2024-05-26 18:00')
 
 const form = reactive({
-  title: '在圣托里尼等一场浪漫的日落 🌅',
-  content: '圣托里尼的日落真的是太美了！\n蓝白色的房子，爱琴海的风，还有橘子味的天空🍊\n这一刻，时间仿佛都慢了下来...\n\n#圣托里尼旅行 #日落 #治愈系',
+  title: '程序员期末周摸鱼自救指南',
+  content: '图书馆写作业写到一半，突然发现番茄钟、AI总结和校园咖啡续命真的可以组成一个稳定工作流。\n\n今天先记录几个很实用的小技巧：先列任务，再让 AI 拆成 25 分钟小块，最后用照片或文字复盘当天进度。',
 })
 
 const publishTypes = [
+  { key: 'text', label: '纯文字', icon: Document },
   { key: 'image', label: '图文', icon: Picture },
-  { key: 'short', label: '短视频', icon: VideoCamera },
-  { key: 'long', label: '长视频', icon: Document },
-  { key: 'live', label: '直播预告', icon: Calendar },
-  { key: 'topic', label: '话题帖子', icon: PriceTag },
-] satisfies Array<{ key: PublishKind; label: string; icon: typeof Picture }>
-
-const sampleCovers = [
-  { id: 'sample-1', url: 'https://picsum.photos/seed/vibelo-santorini-sunset/760/500', label: '封面' },
-  { id: 'sample-2', url: 'https://picsum.photos/seed/vibelo-aegean-coast/760/500', label: '' },
-  { id: 'sample-3', url: 'https://picsum.photos/seed/vibelo-white-town/760/500', label: '' },
-  { id: 'sample-4', url: 'https://picsum.photos/seed/vibelo-evening-sea/760/500', label: '' },
-]
+] satisfies Array<{ key: PublishKind; label: string; icon: typeof Document }>
 
 const drafts = [
-  { title: '希腊圣托里尼日落...', time: '今天 14:30', status: '编辑中', image: 'https://picsum.photos/seed/draft-sunset/120/90' },
-  { title: '健身日常｜新手友好...', time: '今天 10:12', status: '编辑中', image: 'https://picsum.photos/seed/draft-fitness/120/90' },
-  { title: '东京旅行攻略&美食...', time: '昨天 22:45', status: '编辑中', image: 'https://picsum.photos/seed/draft-tokyo/120/90' },
-  { title: '我的桌面分享', time: '05-20 16:30', status: '已保存', image: 'https://picsum.photos/seed/draft-desk/120/90' },
-  { title: '周末露营 Vlog', time: '05-19 09:15', status: '编辑中', image: 'https://picsum.photos/seed/draft-camp/120/90' },
+  { title: '宿舍桌面改造记录', time: '今天 14:30', status: '编辑中', image: 'https://picsum.photos/seed/draft-dorm/120/90' },
+  { title: 'AI工具学习笔记', time: '今天 10:12', status: '编辑中', image: 'https://picsum.photos/seed/draft-ai/120/90' },
+  { title: '校园咖啡地图', time: '昨天 22:45', status: '已保存', image: 'https://picsum.photos/seed/draft-campus/120/90' },
 ]
 
-const tags = ref(['旅行攻略', '圣托里尼', '日落', '海岛旅行', '治愈系'])
+const tagGroups = [
+  {
+    title: '人群',
+    tags: ['大学生校园生活', '摄影爱好者', 'AI工具分享', '二次元穿搭', '宠物日常', '程序员摸鱼社区', '留学生生活'],
+  },
+  {
+    title: '内容形式',
+    tags: ['学习笔记', '日常记录', '经验分享', '效率工具', '穿搭灵感', '作品展示'],
+  },
+]
+
+const selectedTags = ref(['大学生校园生活', 'AI工具分享', '程序员摸鱼社区'])
 
 const syncCommunities = [
-  { name: '旅行日记', members: '12.9万成员', avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=travel' },
-  { name: '摄影分享会', members: '8.7万成员', avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=camera' },
-  { name: '环球美食家', members: '5.3万成员', avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=food' },
+  { name: '大学生校园生活', members: '12.8万成员', avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=campus' },
+  { name: 'AI工具分享', members: '8.2万成员', avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=ai-tools' },
+  { name: '程序员摸鱼社区', members: '7.7万成员', avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=dev-life' },
 ]
 
 const aiTitleSuggestions = [
-  '圣托里尼的日落，就是浪漫本身',
-  '在圣托里尼，我等到了橘色的海',
-  '爱琴海的日落，治愈了所有疲惫',
+  '期末周也能稳住节奏的校园效率流',
+  '一个学生党也能马上用起来的 AI 学习流程',
+  '从摸鱼到复盘：我的校园任务管理小方法',
 ]
 
-const aiTags = ['# 爱琴海', '# 希腊旅行', '# 浪漫时刻', '# 摄影分享', '# 小众旅行地']
+const aiTags = ['# 大学生校园生活', '# AI工具分享', '# 程序员摸鱼社区', '# 学习笔记', '# 效率工具']
 
 const previewComments = [
-  { name: '阿卡的夏天', text: '太美了！我也计划明年去，求攻略~', time: '1小时前', avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=summer' },
-  { name: '奶茶不加糖', text: '图像和文字都好治愈，调调太气质了', time: '50分钟前', avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=milk' },
-  { name: '一只咸鱼', text: '日落真的能治愈人心 🌅', time: '30分钟前', avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=fish' },
+  { name: '课间小岛', text: '这个拆任务方法太适合期末周了', time: '12分钟前', avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=comment-1' },
+  { name: '代码摸鱼中', text: '番茄钟 + AI 总结，我今晚就试试', time: '8分钟前', avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=comment-2' },
 ]
 
 const titleCount = computed(() => form.title.length)
 const contentCount = computed(() => form.content.length)
-const currentUserName = computed(() => authStore.currentUser?.nickname || '小米在旅行')
+const currentUserName = computed(() => authStore.currentUser?.nickname || 'Vibelo 用户')
 const currentUserAvatar = computed(() => authStore.currentUser?.avatarUrl || 'https://api.dicebear.com/9.x/adventurer/svg?seed=creator')
-const uploadedCoverItems = computed(() => uploadedAssets.value.map((asset, index) => ({
-  id: `upload-${asset.objectKey || index}`,
-  url: resolveAssetCover(asset),
-  label: index === 0 ? '封面' : '',
-})))
-const coverChoices = computed(() => [...uploadedCoverItems.value, ...sampleCovers].slice(0, 5))
-const currentCover = computed(() => coverChoices.value.find((item) => item.id === selectedCoverId.value)?.url || coverChoices.value[0]?.url || '/auto_picture.png')
+const hasImages = computed(() => uploadedAssets.value.length > 0)
+const currentCover = computed(() => hasImages.value ? resolveAssetCover(uploadedAssets.value[0]) : '')
 const previewParagraphs = computed(() => form.content.split('\n').filter(Boolean).slice(0, 4))
-const canPublish = computed(() => form.title.trim().length > 0 && uploadedAssets.value.length > 0 && !loading.value && !uploading.value)
+const canPublish = computed(() => {
+  if (loading.value || uploading.value) return false
+  if (!form.title.trim() || !form.content.trim()) return false
+  if (selectedKind.value === 'image' && uploadedAssets.value.length === 0) return false
+  return true
+})
 
 function resolveAssetCover(asset: UploadResponse) {
   return (asset.thumbUrl || asset.fileUrl).replace('http://localhost:9000', '/minio-img')
+}
+
+function toggleTag(tag: string) {
+  selectedTags.value = selectedTags.value.includes(tag)
+    ? selectedTags.value.filter((item) => item !== tag)
+    : [...selectedTags.value, tag]
+}
+
+function removeTag(tag: string) {
+  selectedTags.value = selectedTags.value.filter((item) => item !== tag)
+}
+
+function addCustomTag() {
+  const tag = customTag.value.trim().replace(/^#/, '')
+  if (!tag) return
+  if (selectedTags.value.includes(tag)) {
+    customTag.value = ''
+    return
+  }
+  if (selectedTags.value.length >= 10) {
+    ElMessage.info('最多选择 10 个标签')
+    return
+  }
+  selectedTags.value = [...selectedTags.value, tag]
+  customTag.value = ''
 }
 
 async function onSelectFile(uploadFile: { raw?: File }) {
@@ -123,12 +140,19 @@ async function onSelectFile(uploadFile: { raw?: File }) {
   try {
     const response = await api.uploadImage(uploadFile.raw)
     uploadedAssets.value.push(response)
-    selectedCoverId.value = `upload-${response.objectKey || uploadedAssets.value.length - 1}`
-    ElMessage.success('封面上传成功')
+    selectedKind.value = 'image'
+    ElMessage.success('图片上传成功')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '上传失败')
   } finally {
     uploading.value = false
+  }
+}
+
+function removeAsset(index: number) {
+  uploadedAssets.value.splice(index, 1)
+  if (uploadedAssets.value.length === 0 && selectedKind.value === 'image') {
+    selectedKind.value = 'text'
   }
 }
 
@@ -140,21 +164,17 @@ function saveDraft() {
   }, 450)
 }
 
-function addTag() {
-  if (tags.value.length >= 8) {
-    ElMessage.info('最多添加 8 个标签')
-    return
-  }
-  tags.value = [...tags.value, `新标签${tags.value.length + 1}`]
-}
-
 async function submit() {
   if (!form.title.trim()) {
     ElMessage.warning('请先填写标题')
     return
   }
-  if (uploadedAssets.value.length === 0) {
-    ElMessage.warning('请先上传至少一张封面图片')
+  if (!form.content.trim()) {
+    ElMessage.warning('请先填写正文')
+    return
+  }
+  if (selectedKind.value === 'image' && uploadedAssets.value.length === 0) {
+    ElMessage.warning('图文模式请上传图片，或切换为纯文字')
     return
   }
 
@@ -163,7 +183,7 @@ async function submit() {
     await api.createPost({
       title: form.title.trim(),
       content: form.content.trim(),
-      tags: tags.value,
+      tags: selectedTags.value,
       assets: uploadedAssets.value.map((item, index) => ({
         objectKey: item.objectKey,
         fileUrl: item.fileUrl,
@@ -204,7 +224,7 @@ async function submit() {
 
       <section class="publish-studio__side-card publish-studio__draft-card">
         <div class="publish-studio__side-title">
-          <strong>草稿箱 <em>(12)</em></strong>
+          <strong>草稿箱 <em>(3)</em></strong>
           <button type="button">管理</button>
         </div>
         <article v-for="draft in drafts" :key="draft.title">
@@ -223,7 +243,7 @@ async function submit() {
 
       <footer class="publish-studio__autosave">
         <el-icon><CircleCheck /></el-icon>
-        存稿自动保存于 14:35:50
+        草稿自动保存于 14:35:50
       </footer>
     </aside>
 
@@ -233,7 +253,7 @@ async function submit() {
           <button type="button" @click="router.back()">
             <el-icon><ArrowLeft /></el-icon>
           </button>
-          <h1>新建图文</h1>
+          <h1>{{ selectedKind === 'image' ? '新建图文' : '新建纯文字' }}</h1>
           <span>
             <el-icon><Check /></el-icon>
             已保存
@@ -241,73 +261,74 @@ async function submit() {
         </div>
 
         <label class="publish-studio__title-field">
-          <input v-model="form.title" maxlength="100" placeholder="写一个吸引人的标题" />
+          <input v-model="form.title" maxlength="100" placeholder="写一个清楚、有辨识度的标题" />
           <span>{{ titleCount }}/100</span>
         </label>
 
         <section class="publish-studio__text-editor">
-          <div class="publish-studio__toolbar">
-            <button type="button">正文</button>
-            <button type="button"><strong>B</strong></button>
-            <button type="button"><i>I</i></button>
-            <button type="button"><u>U</u></button>
-            <button type="button">S</button>
-            <button type="button">•</button>
-            <button type="button">1.</button>
-            <button type="button">“</button>
-            <button type="button">🔗</button>
-            <button type="button">▣</button>
-          </div>
-          <textarea v-model="form.content" maxlength="1024" placeholder="分享这一刻的灵感、故事或攻略" />
+          <textarea v-model="form.content" maxlength="1024" placeholder="分享你的经验、日常、灵感或观点" />
           <span>{{ contentCount }}/1024</span>
         </section>
 
         <section class="publish-studio__setting">
-          <h3>草稿设置</h3>
+          <div class="publish-studio__section-head">
+            <h3>图片</h3>
+            <small>纯文字可不上传，图文模式至少上传 1 张</small>
+          </div>
           <div class="publish-studio__covers">
-            <button
-              v-for="cover in coverChoices"
-              :key="cover.id"
-              type="button"
-              :class="{ 'is-active': selectedCoverId === cover.id }"
-              @click="selectedCoverId = cover.id"
-            >
-              <img :src="cover.url" alt="" />
-              <span v-if="cover.label">{{ cover.label }}</span>
-            </button>
+            <article v-for="(asset, index) in uploadedAssets" :key="asset.objectKey" class="publish-studio__asset">
+              <img :src="resolveAssetCover(asset)" alt="" />
+              <button type="button" aria-label="移除图片" @click="removeAsset(index)">
+                <el-icon><Close /></el-icon>
+              </button>
+            </article>
             <el-upload
               :auto-upload="false"
               :show-file-list="false"
               accept="image/*"
+              multiple
               :disabled="uploading"
               :on-change="onSelectFile"
             >
               <button type="button" class="publish-studio__upload">
                 <el-icon><UploadFilled /></el-icon>
-                {{ uploading ? '上传中' : '上传封面' }}
+                {{ uploading ? '上传中' : '上传图片' }}
               </button>
             </el-upload>
           </div>
         </section>
 
         <section class="publish-studio__form-stack">
-          <div class="publish-studio__row">
-            <strong>位置</strong>
-            <div class="publish-studio__pill-field">
-              <el-icon><Location /></el-icon>
-              圣托里尼，希腊
-              <button type="button">×</button>
-            </div>
-          </div>
-
-          <div class="publish-studio__row">
+          <div class="publish-studio__row publish-studio__row--top">
             <strong>标签</strong>
-            <div class="publish-studio__tag-list">
-              <span v-for="tag in tags" :key="tag"># {{ tag }}</span>
-              <button type="button" @click="addTag">
-                <el-icon><Plus /></el-icon>
-                添加标签
-              </button>
+            <div class="publish-studio__tag-panel">
+              <div class="publish-studio__selected-tags">
+                <span v-for="tag in selectedTags" :key="tag">
+                  # {{ tag }}
+                  <button type="button" @click="removeTag(tag)">×</button>
+                </span>
+              </div>
+
+              <section v-for="group in tagGroups" :key="group.title" class="publish-studio__tag-group">
+                <h4>{{ group.title }}</h4>
+                <button
+                  v-for="tag in group.tags"
+                  :key="tag"
+                  type="button"
+                  :class="{ 'is-selected': selectedTags.includes(tag) }"
+                  @click="toggleTag(tag)"
+                >
+                  # {{ tag }}
+                </button>
+              </section>
+
+              <form class="publish-studio__custom-tag" @submit.prevent="addCustomTag">
+                <input v-model="customTag" maxlength="18" placeholder="自定义标签" />
+                <button type="submit">
+                  <el-icon><Plus /></el-icon>
+                  添加
+                </button>
+              </form>
             </div>
           </div>
 
@@ -320,10 +341,6 @@ async function submit() {
                 <b>{{ community.name }}</b>
                 <small>{{ community.members }}</small>
               </article>
-              <button type="button">
-                <el-icon><Plus /></el-icon>
-                选择更多社群
-              </button>
             </div>
           </div>
 
@@ -339,14 +356,14 @@ async function submit() {
           <div class="publish-studio__row publish-studio__publish-time">
             <strong>发布时间</strong>
             <label>
-              <input v-model="publishMode" type="radio" value="now" />
+              <input type="radio" checked />
               立即发布
             </label>
-            <label>
-              <input v-model="publishMode" type="radio" value="schedule" />
+            <label class="is-disabled" title="定时发布暂未开放">
+              <input type="radio" disabled />
               定时发布
             </label>
-            <input v-model="scheduledAt" type="text" />
+            <input type="text" disabled value="暂未开放" />
           </div>
         </section>
       </section>
@@ -355,8 +372,8 @@ async function submit() {
         <button type="button" @click="saveDraft">{{ saving ? '保存中...' : '存为草稿' }}</button>
         <div>
           <button type="button" class="is-ghost">预览</button>
-          <button type="button" class="is-primary" :disabled="loading" @click="submit">
-            {{ loading ? '发布中...' : canPublish ? '发布' : '发布' }}
+          <button type="button" class="is-primary" :disabled="!canPublish" @click="submit">
+            {{ loading ? '发布中...' : '发布' }}
           </button>
         </div>
       </section>
@@ -375,24 +392,24 @@ async function submit() {
             <img :src="currentUserAvatar" alt="" />
             <div>
               <strong>{{ currentUserName }}</strong>
-              <small>刚刚 · 圣托里尼，希腊</small>
+              <small>刚刚 · {{ selectedKind === 'image' ? '图文' : '纯文字' }}</small>
             </div>
             <el-icon><MoreFilled /></el-icon>
           </header>
-          <h3>{{ form.title }}</h3>
+          <h3>{{ form.title || '未填写标题' }}</h3>
           <p v-for="line in previewParagraphs" :key="line">{{ line }}</p>
           <div class="publish-studio__preview-tags">
-            <span v-for="tag in tags.slice(0, 3)" :key="tag">#{{ tag }}</span>
+            <span v-for="tag in selectedTags.slice(0, 4)" :key="tag">#{{ tag }}</span>
           </div>
-          <img class="publish-studio__preview-cover" :src="currentCover" alt="" />
+          <img v-if="currentCover" class="publish-studio__preview-cover" :src="currentCover" alt="" />
           <div class="publish-studio__preview-actions">
-            <span class="is-like">♥ 832</span>
-            <span><el-icon><ChatLineRound /></el-icon> 56</span>
-            <span><el-icon><Share /></el-icon> 128</span>
+            <span class="is-like">♡ 0</span>
+            <span><el-icon><ChatLineRound /></el-icon> 0</span>
+            <span><el-icon><Share /></el-icon></span>
             <span><el-icon><Star /></el-icon></span>
           </div>
           <div class="publish-studio__preview-comments">
-            <h4>评论（56）</h4>
+            <h4>评论预览</h4>
             <article v-for="comment in previewComments" :key="comment.name">
               <img :src="comment.avatar" alt="" />
               <span>
@@ -418,7 +435,7 @@ async function submit() {
 
       <section class="publish-studio__ai-card">
         <div class="publish-studio__ai-head">
-          <strong><el-icon><MagicStick /></el-icon> AI 标题建议</strong>
+          <strong><el-icon><MagicStick /></el-icon> 标题建议</strong>
           <button type="button"><el-icon><RefreshRight /></el-icon></button>
         </div>
         <ol>
@@ -428,7 +445,7 @@ async function submit() {
 
       <section class="publish-studio__ai-card">
         <div class="publish-studio__ai-head">
-          <strong><el-icon><PriceTag /></el-icon> 智能标签推荐</strong>
+          <strong><el-icon><PriceTag /></el-icon> 标签推荐</strong>
           <button type="button"><el-icon><RefreshRight /></el-icon></button>
         </div>
         <div class="publish-studio__ai-tags">
@@ -436,40 +453,9 @@ async function submit() {
         </div>
       </section>
 
-      <section class="publish-studio__ai-card">
-        <div class="publish-studio__ai-head">
-          <strong><el-icon><Picture /></el-icon> 爆款封面建议</strong>
-          <button type="button">换一批</button>
-        </div>
-        <div class="publish-studio__ai-covers">
-          <img v-for="cover in sampleCovers.slice(0, 3)" :key="cover.id" :src="cover.url" alt="" />
-        </div>
-      </section>
-
-      <section class="publish-studio__ai-card publish-studio__time-card">
-        <strong><el-icon><Clock /></el-icon> 最佳发布时间预测</strong>
-        <p>根据你的受众活跃数据，推荐发布时间</p>
-        <b>今天 18:00 - 20:00</b>
-        <em>预计阅读量 +32%</em>
-      </section>
-
       <section class="publish-studio__ai-card publish-studio__risk-card">
-        <strong><el-icon><Warning /></el-icon> 风险提示</strong>
-        <span>内容健康度良好，无敏感风险</span>
-      </section>
-
-      <section class="publish-studio__ai-card publish-studio__audience-card">
-        <strong><el-icon><User /></el-icon> 受众匹配分析</strong>
-        <div>
-          <span>预计触达受众</span>
-          <b>12.8万</b>
-        </div>
-        <div>
-          <span>匹配度</span>
-          <b>92%</b>
-        </div>
-        <i />
-        <p>主要受众：18-35岁，女性，旅行爱好者</p>
+        <strong><el-icon><Warning /></el-icon> 发布检查</strong>
+        <span>{{ selectedKind === 'image' && !hasImages ? '图文模式还需要上传图片' : '内容结构完整，可以发布' }}</span>
       </section>
     </aside>
   </div>
@@ -563,7 +549,8 @@ async function submit() {
 }
 
 .publish-studio__side-title,
-.publish-studio__ai-head {
+.publish-studio__ai-head,
+.publish-studio__section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -726,7 +713,8 @@ async function submit() {
 }
 
 .publish-studio__title-field span,
-.publish-studio__text-editor > span {
+.publish-studio__text-editor > span,
+.publish-studio__section-head small {
   color: #9aa1ad;
   font-size: 12px;
 }
@@ -739,34 +727,9 @@ async function submit() {
   overflow: hidden;
 }
 
-.publish-studio__toolbar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 42px;
-  padding: 0 12px;
-  border-bottom: 1px solid #eef1f5;
-}
-
-.publish-studio__toolbar button {
-  min-width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: #596171;
-  cursor: pointer;
-}
-
-.publish-studio__toolbar button:first-child {
-  min-width: 52px;
-  color: #303744;
-  text-align: left;
-}
-
 .publish-studio__text-editor textarea {
   width: 100%;
-  min-height: 190px;
+  min-height: 210px;
   padding: 18px 16px 38px;
   border: none;
   outline: none;
@@ -786,7 +749,8 @@ async function submit() {
   margin-top: 18px;
 }
 
-.publish-studio__setting h3 {
+.publish-studio__setting h3,
+.publish-studio__section-head h3 {
   margin: 0 0 12px;
   font-size: 15px;
   font-weight: 820;
@@ -798,38 +762,35 @@ async function submit() {
   gap: 10px;
 }
 
-.publish-studio__covers button {
+.publish-studio__asset {
   position: relative;
   overflow: hidden;
   min-height: 84px;
-  border: 1px solid transparent;
+  border: 1px solid #e8ebf0;
   border-radius: 8px;
   background: #f1f3f7;
-  cursor: pointer;
 }
 
-.publish-studio__covers button.is-active {
-  border-color: #ff5a45;
-  box-shadow: 0 0 0 2px rgba(255, 90, 69, 0.14);
-}
-
-.publish-studio__covers img {
+.publish-studio__asset img {
   width: 100%;
   height: 100%;
   display: block;
   object-fit: cover;
 }
 
-.publish-studio__covers span {
+.publish-studio__asset button {
   position: absolute;
-  left: 6px;
+  right: 6px;
   top: 6px;
-  padding: 2px 7px;
-  border-radius: 6px;
-  background: rgba(25, 29, 38, 0.55);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  color: #3c4350;
+  cursor: pointer;
 }
 
 .publish-studio__upload {
@@ -839,8 +800,10 @@ async function submit() {
   width: 112px;
   height: 84px;
   border: 1px dashed #d8dde6 !important;
+  border-radius: 8px;
   background: #fff !important;
   color: #535c6b;
+  cursor: pointer;
 }
 
 .publish-studio__upload .el-icon {
@@ -855,9 +818,13 @@ async function submit() {
 
 .publish-studio__row {
   display: grid;
-  grid-template-columns: 70px minmax(0, 1fr);
+  grid-template-columns: 82px minmax(0, 1fr);
   align-items: center;
   gap: 12px;
+}
+
+.publish-studio__row--top {
+  align-items: start;
 }
 
 .publish-studio__row > strong {
@@ -866,27 +833,13 @@ async function submit() {
   font-weight: 820;
 }
 
-.publish-studio__pill-field {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 38px;
-  padding: 0 12px;
-  border-radius: 8px;
-  background: #f6f7f9;
-  color: #4b5361;
-  font-size: 14px;
+.publish-studio__tag-panel {
+  display: grid;
+  gap: 12px;
 }
 
-.publish-studio__pill-field button {
-  margin-left: auto;
-  border: none;
-  background: transparent;
-  color: #8a91a0;
-  cursor: pointer;
-}
-
-.publish-studio__tag-list,
+.publish-studio__selected-tags,
+.publish-studio__tag-group,
 .publish-studio__community-sync {
   display: flex;
   align-items: center;
@@ -894,13 +847,13 @@ async function submit() {
   gap: 8px;
 }
 
-.publish-studio__tag-list span,
-.publish-studio__tag-list button {
+.publish-studio__selected-tags span,
+.publish-studio__tag-group button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 34px;
-  padding: 0 12px;
+  height: 32px;
+  padding: 0 10px;
   border: 1px solid #e8ebf0;
   border-radius: 999px;
   background: #fff;
@@ -908,7 +861,59 @@ async function submit() {
   font-size: 13px;
 }
 
-.publish-studio__tag-list button {
+.publish-studio__selected-tags span {
+  border-color: #ffd4cc;
+  background: #fff0ed;
+  color: #ff5a45;
+}
+
+.publish-studio__selected-tags button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.publish-studio__tag-group h4 {
+  flex: 0 0 100%;
+  margin: 0;
+  color: #8a91a0;
+  font-size: 12px;
+}
+
+.publish-studio__tag-group button {
+  cursor: pointer;
+}
+
+.publish-studio__tag-group button.is-selected {
+  border-color: #ff5a45;
+  color: #ff5a45;
+}
+
+.publish-studio__custom-tag {
+  display: flex;
+  gap: 8px;
+}
+
+.publish-studio__custom-tag input {
+  width: 180px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid #e8ebf0;
+  border-radius: 8px;
+  outline: none;
+}
+
+.publish-studio__custom-tag button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 8px;
+  background: #fff0ed;
+  color: #ff5a45;
   cursor: pointer;
 }
 
@@ -917,8 +922,7 @@ async function submit() {
   font-size: 13px;
 }
 
-.publish-studio__community-sync article,
-.publish-studio__community-sync button {
+.publish-studio__community-sync article {
   display: inline-grid;
   grid-template-columns: 26px auto;
   align-items: center;
@@ -947,18 +951,12 @@ async function submit() {
   font-size: 11px;
 }
 
-.publish-studio__community-sync button {
-  display: inline-flex;
-  cursor: pointer;
-  color: #4e5665;
-}
-
 .publish-studio__select {
   width: 210px;
 }
 
 .publish-studio__publish-time {
-  grid-template-columns: 70px auto auto 192px;
+  grid-template-columns: 82px auto auto 160px;
 }
 
 .publish-studio__publish-time label {
@@ -967,6 +965,10 @@ async function submit() {
   gap: 7px;
   color: #4e5665;
   font-size: 14px;
+}
+
+.publish-studio__publish-time label.is-disabled {
+  color: #a7aeba;
 }
 
 .publish-studio__publish-time input[type='text'] {
@@ -989,7 +991,6 @@ async function submit() {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  margin-top: 0;
   padding: 16px 18px;
   border-top-left-radius: 0;
   border-top-right-radius: 0;
@@ -1012,10 +1013,6 @@ async function submit() {
   gap: 10px;
 }
 
-.publish-studio__bottom-bar .is-ghost {
-  min-width: 68px;
-}
-
 .publish-studio__bottom-bar .is-primary {
   min-width: 76px;
   border-color: #ff5a45;
@@ -1024,8 +1021,8 @@ async function submit() {
 }
 
 .publish-studio__bottom-bar .is-primary:disabled {
-  opacity: 0.6;
-  cursor: wait;
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .publish-studio__preview-card {
@@ -1257,9 +1254,7 @@ async function submit() {
 }
 
 .publish-studio__ai-head strong,
-.publish-studio__time-card strong,
-.publish-studio__risk-card strong,
-.publish-studio__audience-card strong {
+.publish-studio__risk-card strong {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1295,71 +1290,15 @@ async function submit() {
   line-height: 28px;
 }
 
-.publish-studio__ai-covers {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.publish-studio__ai-covers img {
-  width: 100%;
-  aspect-ratio: 1 / 1;
-  border-radius: 8px;
-  object-fit: cover;
-}
-
-.publish-studio__time-card,
-.publish-studio__risk-card,
-.publish-studio__audience-card {
-  display: grid;
-  gap: 8px;
-}
-
-.publish-studio__time-card p,
-.publish-studio__audience-card p {
-  margin: 0;
-  color: #7e8795;
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.publish-studio__time-card b {
-  color: #20242f;
-  font-size: 15px;
-}
-
-.publish-studio__time-card em {
-  color: #ff5a45;
-  font-style: normal;
-  font-size: 13px;
-  font-weight: 760;
-}
-
 .publish-studio__risk-card {
+  display: grid;
+  gap: 8px;
   background: #f8fff9;
 }
 
 .publish-studio__risk-card span {
   color: #35a766;
   font-size: 13px;
-}
-
-.publish-studio__audience-card > div {
-  display: flex;
-  justify-content: space-between;
-  color: #7e8795;
-  font-size: 13px;
-}
-
-.publish-studio__audience-card b {
-  color: #20242f;
-}
-
-.publish-studio__audience-card i {
-  height: 5px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #35b56a 0 92%, #edf1f5 92% 100%);
 }
 
 @media (max-width: 1580px) {
@@ -1406,13 +1345,10 @@ async function submit() {
   }
 
   .publish-studio__type-card {
-    padding: 10px;
-  }
-
-  .publish-studio__type-card {
     display: flex;
     gap: 8px;
     overflow-x: auto;
+    padding: 10px;
   }
 
   .publish-studio__type-card h2 {

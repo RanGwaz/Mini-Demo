@@ -3,7 +3,6 @@ defineOptions({ name: 'FeedView' })
 
 import {
   ArrowRight,
-  Bell,
   ChatLineRound,
   List,
   Search,
@@ -95,22 +94,25 @@ const isGuestFallbackFeed = computed(() => Boolean(authStore.currentUser && feed
 const skeletonColumns = computed(() => buildFeedSkeletonColumns(columnCount.value, FEED_SKELETON_ROWS))
 const showProgressiveLoading = computed(() => feedLoadingMore.value || stagedFeedQueue.value.length > 0)
 
-const feedTabs = ['推荐', '关注中', '视频', '图文', '热门话题', '同城', '朋友动态']
+const feedTabs = ['推荐', '关注', '朋友动态', '大学生校园生活', '摄影爱好者', 'AI工具分享', '二次元穿搭', '宠物日常', '程序员摸鱼社区', '留学生生活']
+const activeFeedTab = ref('推荐')
 
-const hotTopics = [
-  { title: '春天的第一场旅行', heat: '128.5万热度' },
-  { title: '今日穿搭OOTD', heat: '96.3万热度' },
-  { title: '我的健身日常', heat: '85.7万热度' },
-  { title: '周末探店', heat: '72.1万热度' },
-  { title: '宠物的搞笑瞬间', heat: '64.8万热度' },
+const audienceSegments = [
+  { title: '大学生校园生活', desc: '宿舍、社团、期末周和校园灵感', signal: '12.8万活跃' },
+  { title: '摄影爱好者', desc: '器材、后期、扫街和作品互评', signal: '9.6万活跃' },
+  { title: 'AI工具分享', desc: '效率流、提示词、自动化工作台', signal: '8.2万活跃' },
+  { title: '二次元穿搭', desc: '谷子、痛包、漫展和日常搭配', signal: '6.9万活跃' },
+  { title: '宠物日常', desc: '猫狗日记、萌宠瞬间和养宠经验', signal: '15.1万活跃' },
+  { title: '程序员摸鱼社区', desc: '工位日常、开发梗和下班灵感', signal: '7.7万活跃' },
+  { title: '留学生生活', desc: '租房、做饭、课程和异国日常', signal: '5.4万活跃' },
 ]
 
 const recommendedCreators = [
-  { name: '小海在旅行', bio: '旅行博主 | 风景记录者' },
-  { name: '卡卡要变强', bio: '健身达人 | 自律生活' },
-  { name: '吃货小圆', bio: '美食博主 | 探店爱好者' },
-  { name: '走走停停', bio: '摄影师 | 城市记录者' },
-  { name: '一只鹿鹿', bio: '穿搭博主 | 分享日常' },
+  { name: '课间小岛', bio: '大学生活 | 校园记录' },
+  { name: '快门慢慢按', bio: '摄影爱好者 | 扫街练习' },
+  { name: 'AI效率研究所', bio: 'AI工具 | 自动化流程' },
+  { name: '代码摸鱼中', bio: '程序员日常 | 工位灵感' },
+  { name: '留学厨房笔记', bio: '留学生生活 | 一人食' },
 ]
 
 let intersectionObserver: IntersectionObserver | null = null
@@ -400,6 +402,8 @@ function coverAspectRatio(postId: number) {
 }
 
 function estimatedCardHeight(post: PostView) {
+  if (!post.assets?.length && !post.thumbUrl && !post.coverUrl) return 0.7
+
   const asset = post.assets?.[0]
   const width = Number(asset?.width || 0)
   const height = Number(asset?.height || 0)
@@ -431,6 +435,10 @@ function getCoverAspectRatio(post: PostView) {
   const width = Number(asset?.width || 0)
   const height = Number(asset?.height || 0)
   return width > 0 && height > 0 ? `${width} / ${height}` : coverAspectRatio(post.id)
+}
+
+function hasPostMedia(post: PostView) {
+  return Boolean(post.assets?.length || post.thumbUrl || post.coverUrl)
 }
 
 function markFeedCoverLoaded(postId: number) {
@@ -865,6 +873,11 @@ function clearSearchResults() {
   void loadInitialFeed()
 }
 
+function selectFeedTab(tab: string) {
+  activeFeedTab.value = tab
+  if (isSearchResults.value) clearSearchResults()
+}
+
 async function handleToggleFollow(authorId: number) {
   if (!authStore.currentUser) {
     authStore.openAuthPrompt('manual')
@@ -1022,8 +1035,8 @@ onUnmounted(() => {
         <div class="feed-home__tabs-row">
           <div class="feed-home__tabs" role="tablist" aria-label="内容分类">
             <button v-for="tab in feedTabs" :key="tab" type="button" class="feed-home__tab"
-              :class="{ 'is-active': tab === '推荐' && !isSearchResults }"
-              @click="tab === '推荐' ? clearSearchResults() : undefined">
+              :class="{ 'is-active': tab === activeFeedTab && !isSearchResults }"
+              @click="selectFeedTab(tab)">
               {{ tab }}
             </button>
           </div>
@@ -1077,7 +1090,7 @@ onUnmounted(() => {
               <div v-for="(column, columnIndex) in masonryColumns" :key="`col-${columnIndex}`"
                 class="feed-home__column">
                 <article v-for="post in column" :key="post.id" class="feed-home__card" @click="navigateToPost(post.id)">
-                  <div class="feed-home__card-media">
+                  <div v-if="hasPostMedia(post)" class="feed-home__card-media">
                     <div v-if="!isFeedCoverLoaded(post.id)" class="feed-home__card-skeleton ui-skeleton"
                       :style="{ aspectRatio: getCoverAspectRatio(post) }" />
                     <img class="feed-home__card-image" :class="{ 'is-visible': isFeedCoverLoaded(post.id) }"
@@ -1141,7 +1154,7 @@ onUnmounted(() => {
               <div v-for="(column, columnIndex) in searchedMasonryColumns" :key="`search-col-${columnIndex}`"
                 class="feed-home__column">
                 <article v-for="post in column" :key="post.id" class="feed-home__card" @click="navigateToPost(post.id)">
-                  <div class="feed-home__card-media">
+                  <div v-if="hasPostMedia(post)" class="feed-home__card-media">
                     <div v-if="!isFeedCoverLoaded(post.id)" class="feed-home__card-skeleton ui-skeleton"
                       :style="{ aspectRatio: getCoverAspectRatio(post) }" />
                     <img class="feed-home__card-image" :class="{ 'is-visible': isFeedCoverLoaded(post.id) }"
@@ -1192,16 +1205,16 @@ onUnmounted(() => {
     <aside class="feed-home__right-rail" aria-label="推荐信息">
       <section class="feed-home__right-card">
         <div class="feed-home__right-title">
-          <strong>热门话题</strong>
+          <strong>人群频道</strong>
           <button type="button">更多 <el-icon>
               <ArrowRight />
             </el-icon></button>
         </div>
         <ol class="feed-home__topic-list">
-          <li v-for="(topic, index) in hotTopics" :key="topic.title">
+          <li v-for="(segment, index) in audienceSegments" :key="segment.title">
             <span>{{ index + 1 }}</span>
-            <strong>{{ topic.title }}</strong>
-            <em>{{ topic.heat }}</em>
+            <strong>{{ segment.title }}</strong>
+            <em>{{ segment.signal }}</em>
           </li>
         </ol>
       </section>
@@ -1221,28 +1234,6 @@ onUnmounted(() => {
             <button type="button">关注</button>
           </article>
         </div>
-      </section>
-
-      <section class="feed-home__right-card feed-home__live-card">
-        <div class="feed-home__right-title">
-          <strong>正在直播</strong>
-          <button type="button">更多直播 <el-icon>
-              <ArrowRight />
-            </el-icon></button>
-        </div>
-        <article>
-          <div class="feed-home__live-cover">
-            <img :src="creatorAvatar(1)" alt="" />
-            <span><el-icon>
-                <Bell />
-              </el-icon> LIVE</span>
-          </div>
-          <div>
-            <strong>周末一起云健身</strong>
-            <small>新手友好 · 燃脂训练</small>
-            <em>2.3万人在看</em>
-          </div>
-        </article>
       </section>
 
       <footer class="feed-home__footer-card">
