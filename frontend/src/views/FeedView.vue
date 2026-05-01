@@ -4,7 +4,6 @@ defineOptions({ name: 'FeedView' })
 import {
   ArrowRight,
   ChatLineRound,
-  List,
   Search,
   Share,
 } from '@element-plus/icons-vue'
@@ -12,6 +11,12 @@ import { ElMessage } from 'element-plus'
 import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import CommonLeftSidebar from '../components/CommonLeftSidebar.vue'
+import {
+  feedChannelTabs as channelTabs,
+  feedModeTabs,
+  type FeedChannelKey as ChannelKey,
+  type FeedModeKey,
+} from '../domain/contentTaxonomy'
 import { api, type FeedRequestAuthMode } from '../services/api'
 import { HttpError } from '../services/http'
 import { useAuthStore } from '../stores/auth'
@@ -43,6 +48,8 @@ type FeedPageChunk = {
   records: PostView[]
   total?: number | null
   requestSize?: number
+  consumedPages?: number
+  sourceHasMore?: boolean
 }
 
 type FeedLoadSource = 'scroll' | 'background'
@@ -80,11 +87,14 @@ const prefetchedFeedPage = ref<{ page: number; data: FeedPageChunk } | null>(nul
 const prefetchingFeed = ref(false)
 const stagedFeedQueue = ref<PostView[]>([])
 const followSetLoading = ref(false)
+const friendSetLoading = ref(false)
 const bootstrapped = ref(false)
 const followSetResolvedUserId = ref<number | null>(null)
+const friendSetResolvedUserId = ref<number | null>(null)
 const feedRequestAuthMode = ref<FeedRequestAuthMode>('guest')
 const fallbackFeedNoticeShown = ref(false)
 const feedGuestFallbackActive = ref(false)
+const friendAuthorIds = ref<Set<number>>(new Set())
 
 const isSearchResults = computed(() => Boolean(displayQuery.value.trim()))
 const showInitialFeedSkeleton = computed(() => !bootstrapped.value || (feedInitialLoading.value && posts.value.length === 0))
@@ -93,25 +103,29 @@ const searchedMasonryColumns = computed(() => distributeIntoColumns(searchedPost
 const isGuestFallbackFeed = computed(() => Boolean(authStore.currentUser && feedGuestFallbackActive.value))
 const skeletonColumns = computed(() => buildFeedSkeletonColumns(columnCount.value, FEED_SKELETON_ROWS))
 const showProgressiveLoading = computed(() => feedLoadingMore.value || stagedFeedQueue.value.length > 0)
+const emptyFeedMessage = computed(() => {
+  if (isFollowingFeedMode() && !authStore.currentUser) return '登录后可查看关注动态'
+  if (isFriendsFeedMode() && !authStore.currentUser) return '登录后可查看朋友动态'
+  if (isFollowingFeedMode()) return '你关注的创作者暂时还没有新内容'
+  if (isFriendsFeedMode()) return '你的朋友暂时还没有发布动态'
+  if (activeChannel.value !== 'all') return `频道“${currentChannelMeta.value.label}”暂无内容`
+  return '暂时没有可展示的内容'
+})
 
-const feedTabs = ['推荐', '关注', '朋友动态', '大学生校园生活', '摄影爱好者', 'AI工具分享', '二次元穿搭', '宠物日常', '程序员摸鱼社区', '留学生生活']
-const activeFeedTab = ref('推荐')
+const activeFeedMode = ref<FeedModeKey>('recommend')
+const activeChannel = ref<ChannelKey>('all')
 
-const audienceSegments = [
-  { title: '大学生校园生活', desc: '宿舍、社团、期末周和校园灵感', signal: '12.8万活跃' },
-  { title: '摄影爱好者', desc: '器材、后期、扫街和作品互评', signal: '9.6万活跃' },
-  { title: 'AI工具分享', desc: '效率流、提示词、自动化工作台', signal: '8.2万活跃' },
-  { title: '二次元穿搭', desc: '谷子、痛包、漫展和日常搭配', signal: '6.9万活跃' },
-  { title: '宠物日常', desc: '猫狗日记、萌宠瞬间和养宠经验', signal: '15.1万活跃' },
-  { title: '程序员摸鱼社区', desc: '工位日常、开发梗和下班灵感', signal: '7.7万活跃' },
-  { title: '留学生生活', desc: '租房、做饭、课程和异国日常', signal: '5.4万活跃' },
-]
+const currentChannelMeta = computed(() => (
+  channelTabs.find((item) => item.key === activeChannel.value) || channelTabs[0]
+))
+
+const audienceSegments = computed(() => channelTabs.filter((item) => item.key !== 'all' && item.key !== 'general'))
 
 const recommendedCreators = [
   { name: '课间小岛', bio: '大学生活 | 校园记录' },
   { name: '快门慢慢按', bio: '摄影爱好者 | 扫街练习' },
-  { name: 'AI效率研究所', bio: 'AI工具 | 自动化流程' },
-  { name: '代码摸鱼中', bio: '程序员日常 | 工位灵感' },
+  { name: '漫展衣橱记', bio: '二次元穿搭 | 日常搭配' },
+  { name: '毛球观察室', bio: '宠物日常 | 养宠记录' },
   { name: '留学厨房笔记', bio: '留学生生活 | 一人食' },
 ]
 
@@ -146,6 +160,89 @@ function routeSearchKeyword() {
   const q = route.query.q
   if (Array.isArray(q)) return q[0]?.trim() || ''
   return typeof q === 'string' ? q.trim() : ''
+}
+
+function routeQueryValue(value: unknown) {
+  if (Array.isArray(value)) return value[0] || ''
+  return typeof value === 'string' ? value : ''
+}
+
+function resolveFeedModeFromRoute(): FeedModeKey {
+  const value = routeQueryValue(route.query.feed)
+  return feedModeTabs.some((item) => item.key === value)
+    ? value as FeedModeKey
+    : 'recommend'
+}
+
+function resolveChannelFromRoute(): ChannelKey {
+  const value = routeQueryValue(route.query.channel)
+  return channelTabs.some((item) => item.key === value)
+    ? value as ChannelKey
+    : 'all'
+}
+
+function applyRouteFeedState() {
+  activeFeedMode.value = resolveFeedModeFromRoute()
+  activeChannel.value = resolveChannelFromRoute()
+}
+
+function syncFeedQueryToRoute() {
+  const nextQuery = { ...route.query } as Record<string, string | string[] | null | undefined>
+  if (activeFeedMode.value === 'recommend') delete nextQuery.feed
+  else nextQuery.feed = activeFeedMode.value
+  if (activeChannel.value === 'all') delete nextQuery.channel
+  else nextQuery.channel = activeChannel.value
+  void router.replace({ path: '/home', query: nextQuery })
+}
+
+function isFollowingFeedMode() {
+  return activeFeedMode.value === 'following'
+}
+
+function isFriendsFeedMode() {
+  return activeFeedMode.value === 'friends'
+}
+
+function currentChannelFilters() {
+  const meta = channelTabs.find((item) => item.key === activeChannel.value)
+  return meta?.filters
+}
+
+function normalizedText(value?: string | null) {
+  return (value || '').toLowerCase()
+}
+
+function postSearchTokens(post: PostView) {
+  const tokens = [
+    normalizedText(post.title),
+    normalizedText(post.content),
+    normalizedText(post.topicPath),
+    ...(post.tags || []).map((item) => normalizedText(item)),
+    ...(post.semanticTags || []).map((item) => normalizedText(item)),
+    ...(post.styleTags || []).map((item) => normalizedText(item)),
+  ].filter(Boolean)
+  return tokens.join(' ')
+}
+
+function postMatchesCurrentChannel(post: PostView) {
+  if (activeChannel.value === 'all') return true
+  const channel = channelTabs.find((item) => item.key === activeChannel.value)
+  if (!channel) return true
+  const haystack = postSearchTokens(post)
+  if (!haystack) return false
+  return channel.keywords.some((keyword) => haystack.includes(normalizedText(keyword)))
+}
+
+function postMatchesFeedMode(post: PostView) {
+  if (activeFeedMode.value === 'recommend') return true
+  if (!authStore.currentUser) return false
+  if (isFollowingFeedMode()) return followingAuthorIds.value.has(post.author.id)
+  if (isFriendsFeedMode()) return friendAuthorIds.value.has(post.author.id)
+  return true
+}
+
+function filterRecordsByActiveScope(records: PostView[]) {
+  return records.filter((post) => postMatchesFeedMode(post) && postMatchesCurrentChannel(post))
 }
 
 function navigationType() {
@@ -402,7 +499,8 @@ function coverAspectRatio(postId: number) {
 }
 
 function estimatedCardHeight(post: PostView) {
-  if (!post.assets?.length && !post.thumbUrl && !post.coverUrl) return 0.7
+  const hasMedia = Boolean(post.assets?.length || post.thumbUrl || post.coverUrl)
+  if (!hasMedia) return 0.7
 
   const asset = post.assets?.[0]
   const width = Number(asset?.width || 0)
@@ -525,6 +623,41 @@ async function loadFollowSet() {
   }
 }
 
+async function loadFriendSet() {
+  if (!authStore.currentUser) {
+    friendAuthorIds.value = new Set()
+    friendSetResolvedUserId.value = null
+    return
+  }
+  if (friendSetLoading.value || friendSetResolvedUserId.value === authStore.currentUser.id) return
+  friendSetLoading.value = true
+  try {
+    const [following, followers] = await Promise.all([
+      api.following(authStore.currentUser.id),
+      api.followers(authStore.currentUser.id),
+    ])
+    const followerIds = new Set(followers.map((item) => item.id))
+    friendAuthorIds.value = new Set(following.map((item) => item.id).filter((id) => followerIds.has(id)))
+    followingAuthorIds.value = new Set(following.map((item) => item.id))
+    friendSetResolvedUserId.value = authStore.currentUser.id
+    followSetResolvedUserId.value = authStore.currentUser.id
+  } catch {
+    friendAuthorIds.value = new Set()
+  } finally {
+    friendSetLoading.value = false
+  }
+}
+
+async function ensureFeedScopeDependencies() {
+  if (isFollowingFeedMode()) {
+    await loadFollowSet()
+    return
+  }
+  if (isFriendsFeedMode()) {
+    await loadFriendSet()
+  }
+}
+
 function resetFeedState() {
   clearFeedRevealQueue()
   resetBackgroundFeedWarmup()
@@ -548,7 +681,7 @@ type FeedCachePayload = {
 }
 
 function currentFeedCacheKey() {
-  return `image-social-feed-cache:${authStore.currentUser?.id || 'guest'}:all`
+  return `image-social-feed-cache:${authStore.currentUser?.id || 'guest'}:${activeFeedMode.value}:${activeChannel.value}`
 }
 
 function restoreFeedFromCache() {
@@ -612,6 +745,8 @@ function rememberPrefetchedPage(page: number, data: FeedPageChunk) {
       records: data.records || [],
       total: typeof data.total === 'number' ? data.total : null,
       requestSize: data.requestSize,
+      consumedPages: data.consumedPages,
+      sourceHasMore: data.sourceHasMore,
     },
   }
 }
@@ -628,12 +763,12 @@ async function prefetchFeedPage(page: number) {
   if (prefetchedFeedPage.value?.page === page) return
   if (posts.value.length >= FEED_MAX_ITEMS) return
 
-  const prefetchSignature = `${feedSeed.value}|${displayQuery.value}`
+  const prefetchSignature = `${feedSeed.value}|${displayQuery.value}|${activeFeedMode.value}|${activeChannel.value}`
   const requestSize = currentFeedPageSize()
   prefetchingFeed.value = true
   try {
     const data = await requestFeedPage(page, requestSize)
-    const latestSignature = `${feedSeed.value}|${displayQuery.value}`
+    const latestSignature = `${feedSeed.value}|${displayQuery.value}|${activeFeedMode.value}|${activeChannel.value}`
     if (latestSignature !== prefetchSignature) return
     rememberPrefetchedPage(page, { ...data, requestSize })
   } catch {
@@ -644,7 +779,8 @@ async function prefetchFeedPage(page: number) {
 }
 
 function applyLoadedFeedPage(page: number, data: FeedPageChunk) {
-  feedNextPage.value = page + 1
+  const consumedPages = Math.max(1, Number(data.consumedPages || 1))
+  feedNextPage.value = page + consumedPages
   const requestSize = data.requestSize || currentFeedPageSize()
 
   const orderedBatch = data.records || []
@@ -655,8 +791,9 @@ function applyLoadedFeedPage(page: number, data: FeedPageChunk) {
   }
 
   if (typeof data.total === 'number') total.value = data.total
-  const serverHasMore = (data.records || []).length >= requestSize
-    || (typeof data.total === 'number' && page * requestSize < data.total)
+  const serverHasMore = typeof data.sourceHasMore === 'boolean'
+    ? data.sourceHasMore
+    : computeServerHasMore(page, requestSize, data.records || [], data.total)
   feedHasMore.value = serverHasMore && posts.value.length < FEED_MAX_ITEMS
 }
 
@@ -674,14 +811,15 @@ function isStaleSessionUserError(error: unknown) {
   return error instanceof HttpError && error.code === 'U001'
 }
 
-async function requestFeedPage(page: number, requestSize = currentFeedPageSize()): Promise<FeedPageChunk> {
+async function requestFeedPageRaw(page: number, requestSize = currentFeedPageSize()): Promise<FeedPageChunk> {
+  const filters = currentChannelFilters()
   if (feedRequestAuthMode.value === 'guest') {
-    const data = await api.homeFeed(page, requestSize, feedSeed.value, undefined, 'guest')
+    const data = await api.homeFeed(page, requestSize, feedSeed.value, filters, 'guest')
     return { ...data, requestSize }
   }
 
   try {
-    const data = await api.homeFeed(page, requestSize, feedSeed.value, undefined, 'session')
+    const data = await api.homeFeed(page, requestSize, feedSeed.value, filters, 'session')
     feedGuestFallbackActive.value = false
     return { ...data, requestSize }
   } catch (error) {
@@ -692,7 +830,7 @@ async function requestFeedPage(page: number, requestSize = currentFeedPageSize()
       feedGuestFallbackActive.value = false
       fallbackFeedNoticeShown.value = true
       prefetchedFeedPage.value = null
-      const data = await api.homeFeed(page, requestSize, feedSeed.value, undefined, 'guest')
+      const data = await api.homeFeed(page, requestSize, feedSeed.value, filters, 'guest')
       return { ...data, requestSize }
     }
     feedGuestFallbackActive.value = true
@@ -701,8 +839,63 @@ async function requestFeedPage(page: number, requestSize = currentFeedPageSize()
       fallbackFeedNoticeShown.value = true
       ElMessage.warning('个性化推荐暂时较慢，已切换为探索流')
     }
-    const data = await api.homeFeed(page, requestSize, feedSeed.value, undefined, 'guest')
+    const data = await api.homeFeed(page, requestSize, feedSeed.value, filters, 'guest')
     return { ...data, requestSize }
+  }
+}
+
+function computeServerHasMore(page: number, requestSize: number, records: PostView[], totalValue?: number | null) {
+  return records.length >= requestSize
+    || (typeof totalValue === 'number' && page * requestSize < totalValue)
+}
+
+async function requestFeedPage(page: number, requestSize = currentFeedPageSize()): Promise<FeedPageChunk> {
+  if ((isFollowingFeedMode() || isFriendsFeedMode()) && !authStore.currentUser) {
+    return {
+      records: [],
+      total: 0,
+      requestSize,
+      consumedPages: 1,
+      sourceHasMore: false,
+    }
+  }
+
+  await ensureFeedScopeDependencies()
+
+  const needExtraScan = isFollowingFeedMode() || isFriendsFeedMode() || activeChannel.value !== 'all'
+  if (!needExtraScan) {
+    const data = await requestFeedPageRaw(page, requestSize)
+    return {
+      ...data,
+      records: filterRecordsByActiveScope(data.records || []),
+      consumedPages: 1,
+      sourceHasMore: computeServerHasMore(page, requestSize, data.records || [], data.total),
+    }
+  }
+
+  const maxSweepPages = 5
+  let cursor = page
+  let consumedPages = 0
+  let aggregated: PostView[] = []
+  let totalValue: number | null = null
+  let hasMore = true
+
+  while (hasMore && consumedPages < maxSweepPages && aggregated.length < requestSize) {
+    const data = await requestFeedPageRaw(cursor, requestSize)
+    const filtered = filterRecordsByActiveScope(data.records || [])
+    aggregated = dedupeRecords([...aggregated, ...filtered]).slice(0, requestSize)
+    if (typeof data.total === 'number') totalValue = data.total
+    hasMore = computeServerHasMore(cursor, requestSize, data.records || [], data.total)
+    cursor += 1
+    consumedPages += 1
+  }
+
+  return {
+    records: aggregated,
+    total: totalValue,
+    requestSize,
+    consumedPages: Math.max(1, consumedPages),
+    sourceHasMore: hasMore,
   }
 }
 
@@ -860,7 +1053,7 @@ async function runSearch() {
   }
 }
 
-function clearSearchResults() {
+function clearSearchResults(reload = true) {
   keyword.value = ''
   displayQuery.value = ''
   searchResultsTab.value = 'posts'
@@ -870,12 +1063,25 @@ function clearSearchResults() {
   coverFallbackMap.value = {}
   prefetchedFeedPage.value = null
   resetBackgroundFeedWarmup()
-  void loadInitialFeed()
+  if (reload) void loadInitialFeed()
 }
 
-function selectFeedTab(tab: string) {
-  activeFeedTab.value = tab
-  if (isSearchResults.value) clearSearchResults()
+async function reloadFeedByScope() {
+  feedRequestSerial += 1
+  feedInitialLoading.value = false
+  feedLoadingMore.value = false
+  if (isSearchResults.value) clearSearchResults(false)
+  refreshFeedSeed()
+  resetFeedState()
+  await loadInitialFeed()
+  window.scrollTo({ top: 0, behavior: 'auto' })
+}
+
+function selectChannel(channel: ChannelKey) {
+  if (activeChannel.value === channel) return
+  activeChannel.value = channel
+  syncFeedQueryToRoute()
+  void reloadFeedByScope()
 }
 
 async function handleToggleFollow(authorId: number) {
@@ -942,6 +1148,19 @@ watch(
 )
 
 watch(
+  () => [route.query.feed, route.query.channel] as const,
+  async () => {
+    if (!bootstrapped.value) return
+    const nextMode = resolveFeedModeFromRoute()
+    const nextChannel = resolveChannelFromRoute()
+    if (nextMode === activeFeedMode.value && nextChannel === activeChannel.value) return
+    activeFeedMode.value = nextMode
+    activeChannel.value = nextChannel
+    await reloadFeedByScope()
+  },
+)
+
+watch(
   () => [searchResultsTab.value, searchedUsers.value.length, authStore.currentUser?.id] as const,
   ([tab, count, userId]) => {
     if (tab !== 'users' || count === 0 || !userId) return
@@ -954,7 +1173,9 @@ watch(
   (nextId, previousId) => {
     if (nextId === previousId) return
     followingAuthorIds.value = new Set()
+    friendAuthorIds.value = new Set()
     followSetResolvedUserId.value = null
+    friendSetResolvedUserId.value = null
     resetFeedRequestAuthMode()
     if (!bootstrapped.value) return
     if (!isSearchResults.value) {
@@ -967,6 +1188,7 @@ watch(
 
 onMounted(async () => {
   resetFeedRequestAuthMode()
+  applyRouteFeedState()
   updateColumnCount()
   const navType = navigationType()
   const shouldRealtimeRefresh = consumeRealtimeRefreshFlag()
@@ -1032,21 +1254,6 @@ onUnmounted(() => {
 
     <main class="feed-home__main">
       <section class="feed-home__content-panel">
-        <div class="feed-home__tabs-row">
-          <div class="feed-home__tabs" role="tablist" aria-label="内容分类">
-            <button v-for="tab in feedTabs" :key="tab" type="button" class="feed-home__tab"
-              :class="{ 'is-active': tab === activeFeedTab && !isSearchResults }"
-              @click="selectFeedTab(tab)">
-              {{ tab }}
-            </button>
-          </div>
-          <button type="button" class="feed-home__layout-btn" aria-label="切换布局">
-            <el-icon>
-              <List />
-            </el-icon>
-          </button>
-        </div>
-
         <div v-if="isGuestFallbackFeed" class="feed-home__fallback-banner">
           个性化推荐暂时较慢，当前展示探索流。
         </div>
@@ -1144,7 +1351,7 @@ onUnmounted(() => {
             </p>
           </div>
 
-          <div v-else class="ui-state ui-state--empty feed-home__state">暂时没有可展示的内容</div>
+          <div v-else class="ui-state ui-state--empty feed-home__state">{{ emptyFeedMessage }}</div>
         </template>
 
         <template v-else-if="searchResultsTab === 'posts'">
@@ -1211,9 +1418,10 @@ onUnmounted(() => {
             </el-icon></button>
         </div>
         <ol class="feed-home__topic-list">
-          <li v-for="(segment, index) in audienceSegments" :key="segment.title">
+          <li v-for="(segment, index) in audienceSegments" :key="segment.key"
+            :class="{ 'is-active': segment.key === activeChannel }" @click="selectChannel(segment.key)">
             <span>{{ index + 1 }}</span>
-            <strong>{{ segment.title }}</strong>
+            <strong>{{ segment.label }}</strong>
             <em>{{ segment.signal }}</em>
           </li>
         </ol>
@@ -1471,15 +1679,18 @@ onUnmounted(() => {
   position: sticky;
   top: 74px;
   z-index: 30;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   padding: 0 0 12px;
+  border-bottom: 1px solid #eef1f5;
+  margin-bottom: 12px;
   background: #fff;
 }
 
 .feed-home__tabs {
+  z-index: 29;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1492,18 +1703,34 @@ onUnmounted(() => {
   display: none;
 }
 
+.feed-home__tab-block-title {
+  color: #8c92a1;
+  font-size: 12px;
+  font-weight: 680;
+  line-height: 1;
+}
+
+.feed-home__tabs--channel {
+  gap: 8px;
+}
+
 .feed-home__tab {
   flex: 0 0 auto;
-  min-height: 34px;
-  padding: 0 18px;
+  min-height: 32px;
+  padding: 0 14px;
   border: 1px solid #e7eaf0;
   border-radius: 999px;
   background: #fff;
   color: #222733;
-  font-size: 14px;
-  font-weight: 720;
+  font-size: 13px;
+  font-weight: 690;
   cursor: pointer;
   transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.feed-home__tab--channel {
+  min-width: max-content;
+  padding: 0 12px;
 }
 
 .feed-home__tab:hover,
@@ -1830,6 +2057,15 @@ onUnmounted(() => {
   grid-template-columns: 20px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.16s ease;
+}
+
+.feed-home__topic-list li:hover,
+.feed-home__topic-list li.is-active {
+  background: #fff1ed;
 }
 
 .feed-home__topic-list span {
@@ -2112,6 +2348,10 @@ onUnmounted(() => {
     top: 62px;
   }
 
+  .feed-home__channel-row {
+    top: 114px;
+  }
+
   .feed-home__user-card {
     grid-template-columns: auto minmax(0, 1fr);
   }
@@ -2162,6 +2402,12 @@ onUnmounted(() => {
 
   .feed-home__tabs-row {
     align-items: flex-start;
+  }
+
+  .feed-home__channel-row {
+    top: 108px;
+    grid-template-columns: 1fr;
+    gap: 8px;
   }
 
   .feed-home__tab {

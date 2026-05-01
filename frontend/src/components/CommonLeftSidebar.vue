@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import {
   ArrowRight,
+  Brush,
   Camera,
-  CoffeeCup,
   HomeFilled,
-  MagicStick,
   Notebook,
+  Opportunity,
+  School,
   Star,
   UserFilled,
 } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
+import { contentChannels, type ContentChannelKey } from '../domain/contentTaxonomy'
 
 const props = withDefaults(defineProps<{
   fixed?: boolean
@@ -21,43 +22,73 @@ const props = withDefaults(defineProps<{
 const router = useRouter()
 const route = useRoute()
 
-const navItems = [
-  { key: 'recommend', label: '为你推荐', icon: HomeFilled, path: '/feed' },
-  { key: 'following', label: '关注', icon: UserFilled },
-  { key: 'friends', label: '朋友动态', icon: Star },
-  { key: 'campus', label: '大学生校园生活', icon: Notebook },
-  { key: 'photo', label: '摄影爱好者', icon: Camera },
-  { key: 'ai', label: 'AI工具分享', icon: MagicStick },
-  { key: 'dev', label: '程序员摸鱼社区', icon: CoffeeCup },
-] satisfies Array<{
+const channelIcons: Record<ContentChannelKey, typeof HomeFilled> = {
+  general: HomeFilled,
+  campus_life: Notebook,
+  photography: Camera,
+  anime_outfit: Brush,
+  pets: Opportunity,
+  overseas: School,
+}
+
+type NavItem = {
   key: string
   label: string
   icon: typeof HomeFilled
-  path?: string
-}>
-
-const audienceRows = [
-  { name: '二次元穿搭', members: '6.9万活跃', avatar: 'https://picsum.photos/seed/sidebar-anime/80/80' },
-  { name: '宠物日常', members: '15.1万活跃', avatar: 'https://picsum.photos/seed/sidebar-pet/80/80' },
-  { name: '留学生生活', members: '5.4万活跃', avatar: 'https://picsum.photos/seed/sidebar-abroad/80/80' },
-]
-
-function isActive(itemPath?: string) {
-  if (!itemPath) return false
-  if (itemPath === '/feed') return route.path === '/feed' || route.path.startsWith('/posts/')
-  return route.path === itemPath
+  query: { feed?: string; channel?: string }
 }
 
-function handleNav(item: (typeof navItems)[number]) {
-  if (item.path) {
-    if (isActive(item.path)) {
-      window.scrollTo({ top: 0, behavior: 'smooth' })
-      return
-    }
-    void router.push(item.path)
+const navItems: NavItem[] = [
+  { key: 'recommend', label: '为你推荐', icon: HomeFilled, query: { feed: 'recommend' } },
+  { key: 'following', label: '关注', icon: UserFilled, query: { feed: 'following' } },
+  { key: 'friends', label: '朋友动态', icon: Star, query: { feed: 'friends' } },
+  ...contentChannels.map((channel) => ({
+    key: channel.key,
+    label: channel.label,
+    icon: channelIcons[channel.key],
+    query: { channel: channel.key },
+  })),
+]
+
+const audienceRows = contentChannels.filter((channel) => channel.key !== 'general').slice(2, 5)
+
+function routeQueryValue(value: unknown) {
+  if (Array.isArray(value)) return value[0] || ''
+  return typeof value === 'string' ? value : ''
+}
+
+function feedHomePath() {
+  return '/home'
+}
+
+function navQuery(item: NavItem) {
+  const query: Record<string, string> = {}
+  const feed = item.query.feed
+  const channel = item.query.channel
+  if (feed && feed !== 'recommend') query.feed = feed
+  if (channel && channel !== 'all') query.channel = channel
+  return query
+}
+
+function isActive(item: NavItem) {
+  if (!(route.path === '/feed' || route.path === '/home' || route.path.startsWith('/posts/'))) return false
+  const currentFeed = routeQueryValue(route.query.feed) || 'recommend'
+  const currentChannel = routeQueryValue(route.query.channel) || 'all'
+  if (item.query.feed) return currentChannel === 'all' && currentFeed === item.query.feed
+  if (item.query.channel) return currentChannel === item.query.channel
+  return false
+}
+
+function handleNav(item: NavItem) {
+  if (isActive(item)) {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
     return
   }
-  ElMessage.info(`${item.label} 内容筛选正在接入中`)
+  void router.push({ path: feedHomePath(), query: navQuery(item) })
+}
+
+function jumpToChannel(channel: string) {
+  void router.push({ path: feedHomePath(), query: { channel } })
 }
 </script>
 
@@ -69,7 +100,7 @@ function handleNav(item: (typeof navItems)[number]) {
         :key="item.key"
         type="button"
         class="common-left-rail__side-item"
-        :class="{ 'is-active': isActive(item.path) }"
+        :class="{ 'is-active': isActive(item) }"
         @click="handleNav(item)"
       >
         <el-icon><component :is="item.icon" /></el-icon>
@@ -88,14 +119,15 @@ function handleNav(item: (typeof navItems)[number]) {
 
       <button
         v-for="audience in audienceRows"
-        :key="audience.name"
+        :key="audience.key"
         type="button"
         class="common-left-rail__community-row"
+        @click="jumpToChannel(audience.key)"
       >
         <img :src="audience.avatar" alt="" />
         <span>
-          <strong>{{ audience.name }}</strong>
-          <small>{{ audience.members }}</small>
+          <strong>{{ audience.label }}</strong>
+          <small>{{ audience.signal }}</small>
         </span>
       </button>
     </section>

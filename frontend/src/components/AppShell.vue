@@ -16,6 +16,12 @@ import { useRoute, useRouter } from 'vue-router'
 import AuthWallDialog from './AuthWallDialog.vue'
 import { useAuthStore } from '../stores/auth'
 
+type NavItem = {
+  key: 'discover' | 'creator'
+  label: string
+  path: '/home' | '/publish'
+}
+
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
@@ -23,10 +29,8 @@ const globalKeyword = ref('')
 
 authStore.hydrate()
 
-const navItems = [
-  { key: 'feed', label: '首页', path: '/feed' },
-  { key: 'discover', label: '发现' },
-  { key: 'following', label: '关注' },
+const navItems: NavItem[] = [
+  { key: 'discover', label: '发现', path: '/home' },
   { key: 'creator', label: '创作中心', path: '/publish' },
 ]
 
@@ -38,28 +42,32 @@ function handleDeveloping(name: string) {
   ElMessage.info(`${name} 功能正在完善中`)
 }
 
-function isNavActive(item: (typeof navItems)[number]) {
-  if (!item.path) return false
-  if (item.path === '/publish') return route.path.startsWith('/publish')
-  return route.path === item.path
+function isFeedSurfacePath() {
+  return route.path === '/home' || route.path === '/feed' || route.path.startsWith('/posts/')
 }
 
-function handleNav(item: (typeof navItems)[number]) {
-  if (item.path) {
-    if (isNavActive(item)) {
-      window.scrollTo({ top: 0, behavior: 'smooth' })
-      return
-    }
-    go(item.path)
+function isNavActive(item: NavItem) {
+  if (item.key === 'creator') return route.path.startsWith('/publish')
+  if (item.key === 'discover') return isFeedSurfacePath()
+  return false
+}
+
+function handleNav(item: NavItem) {
+  if (isNavActive(item)) {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
     return
   }
-  handleDeveloping(item.label)
+  go(item.path)
 }
 
 function submitGlobalSearch() {
   const keyword = globalKeyword.value.trim()
   if (!keyword) return
-  void router.push({ path: '/feed', query: { q: keyword } })
+  const baseQuery = isFeedSurfacePath()
+    ? { ...route.query } as Record<string, string | string[] | null | undefined>
+    : {}
+  baseQuery.q = keyword
+  void router.push({ path: '/home', query: baseQuery })
 }
 
 function publish() {
@@ -82,7 +90,7 @@ async function handleAvatarCommand(command: string) {
   if (command === 'logout') {
     await authStore.logout()
     ElMessage.success('已退出登录')
-    go('/feed')
+    go('/home')
   }
 }
 
@@ -90,6 +98,7 @@ watch(
   () => route.query.q,
   (value) => {
     if (typeof value === 'string') globalKeyword.value = value
+    if (!value) globalKeyword.value = ''
   },
   { immediate: true },
 )
@@ -98,7 +107,7 @@ watch(
 <template>
   <div class="app-shell">
     <header class="app-shell__topbar">
-      <button type="button" class="app-shell__brand" aria-label="回到首页" @click="go('/feed')">
+      <button type="button" class="app-shell__brand" aria-label="回到首页" @click="go('/home')">
         <span class="app-shell__brand-mark" aria-hidden="true">
           <i />
           <i />
@@ -194,7 +203,7 @@ watch(
   inset: 0 0 auto 0;
   z-index: 90;
   display: grid;
-  grid-template-columns: 250px minmax(240px, 420px) minmax(360px, 1fr) auto;
+  grid-template-columns: 250px minmax(240px, 420px) minmax(220px, 1fr) auto;
   align-items: center;
   gap: 18px;
   height: 74px;
@@ -270,7 +279,6 @@ watch(
   color: #101522;
   font-size: 30px;
   font-weight: 900;
-  letter-spacing: 0;
   line-height: 1;
 }
 
@@ -317,7 +325,7 @@ watch(
   display: flex;
   align-items: stretch;
   justify-content: center;
-  gap: 26px;
+  gap: 24px;
   min-width: 0;
   height: 100%;
 }
@@ -397,7 +405,8 @@ watch(
 .app-shell__avatar-btn {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
+  min-height: 38px;
   padding: 0;
 }
 
@@ -412,127 +421,115 @@ watch(
 .app-shell__avatar-btn > .el-icon:first-child {
   display: grid;
   place-items: center;
-  background: #eef1f5;
-  color: #6a7280;
-  font-size: 20px;
+  background: #eef1f6;
+  color: #7c8494;
+  font-size: 21px;
 }
 
 .app-shell__avatar-btn span {
-  width: 10px;
-  height: 10px;
-  margin-left: -18px;
-  align-self: end;
+  width: 9px;
+  height: 9px;
+  margin-left: -14px;
   border: 2px solid #fff;
   border-radius: 50%;
-  background: #45b56a;
+  background: #36c36b;
 }
 
 .app-shell__avatar-caret {
-  color: #798190;
-  font-size: 14px;
+  color: #959cac;
+  font-size: 12px;
 }
 
 .app-shell__publish {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 7px;
+  gap: 8px;
   height: 42px;
-  min-width: 86px;
-  padding: 0 18px;
-  border-radius: 8px;
-  background: #ff5a45;
+  padding: 0 20px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ff7057 0%, #ff4d3c 100%);
   color: #fff;
-  font-size: 15px;
-  font-weight: 820;
-  box-shadow: 0 10px 22px rgba(255, 90, 69, 0.26);
-}
-
-.app-shell__publish:hover {
-  background: #f04835;
+  font-size: 17px;
+  font-weight: 780;
 }
 
 .app-shell__main {
-  min-height: 100vh;
   padding-top: 74px;
 }
 
 :deep(.app-shell__account-menu .el-dropdown-menu__item) {
-  gap: 8px;
-  min-width: 132px;
+  min-width: 136px;
+  gap: 7px;
 }
 
 @media (max-width: 1360px) {
   .app-shell__topbar {
-    grid-template-columns: 210px minmax(220px, 1fr) auto;
-  }
-
-  .app-shell__nav {
-    display: none;
+    grid-template-columns: 220px minmax(220px, 360px) minmax(180px, 1fr) auto;
+    gap: 14px;
+    padding: 0 18px;
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 1200px) {
   .app-shell__topbar {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(180px, 1fr) auto;
+    height: 66px;
+    padding: 0 12px;
     gap: 10px;
-    height: 62px;
-    padding: 0 10px;
   }
 
   .app-shell__brand-word,
   .app-shell__search kbd,
-  .app-shell__icon-action,
-  .app-shell__avatar-caret {
+  .app-shell__avatar-caret,
+  .app-shell__nav {
     display: none;
   }
 
   .app-shell__brand-mark {
-    width: 34px;
+    width: 36px;
     height: 32px;
   }
 
   .app-shell__brand-mark i:nth-child(1) {
-    width: 12px;
-    height: 29px;
+    left: 2px;
+    top: 1px;
+    width: 13px;
+    height: 30px;
   }
 
   .app-shell__brand-mark i:nth-child(2) {
     left: 12px;
-    width: 13px;
-    height: 23px;
+    top: 8px;
+    width: 14px;
+    height: 24px;
   }
 
   .app-shell__brand-mark i:nth-child(3) {
+    right: 2px;
+    top: 1px;
     width: 12px;
     height: 21px;
   }
 
-  .app-shell__search {
-    height: 40px;
-    padding: 0 12px;
+  .app-shell__actions {
+    gap: 8px;
   }
 
-  .app-shell__publish {
-    min-width: 42px;
-    width: 42px;
-    padding: 0;
-    border-radius: 8px;
-    font-size: 0;
-  }
-
-  .app-shell__publish .el-icon {
+  .app-shell__icon-action {
+    width: 34px;
+    height: 34px;
     font-size: 18px;
   }
 
-  .app-shell__main {
-    padding-top: 62px;
+  .app-shell__publish {
+    height: 36px;
+    padding: 0 12px;
+    border-radius: 10px;
+    font-size: 14px;
   }
-}
 
-@media (max-width: 480px) {
-  .app-shell__avatar-btn {
-    display: none;
+  .app-shell__main {
+    padding-top: 66px;
   }
 }
 </style>
