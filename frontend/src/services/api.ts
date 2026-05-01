@@ -30,6 +30,7 @@ export interface CreatePostAssetPayload {
 export interface FeedQueryFilters {
   topic?: string
   style?: string
+  tag?: string
 }
 
 export type FeedRequestAuthMode = 'session' | 'guest'
@@ -73,6 +74,7 @@ export const api = {
         ...(seed ? { seed } : {}),
         ...(filters?.topic ? { topic: filters.topic } : {}),
         ...(filters?.style ? { style: filters.style } : {}),
+        ...(filters?.tag ? { tag: filters.tag } : {}),
       },
     }))
   },
@@ -85,6 +87,7 @@ export const api = {
         size,
         ...(filters?.topic ? { topic: filters.topic } : {}),
         ...(filters?.style ? { style: filters.style } : {}),
+        ...(filters?.tag ? { tag: filters.tag } : {}),
       },
     }))
   },
@@ -100,8 +103,9 @@ export const api = {
   createPost(payload: {
     title: string
     content: string
-    tags: string[]
-    assets: CreatePostAssetPayload[]
+    channel: string
+    tags?: string[]
+    assets?: CreatePostAssetPayload[]
   }) {
     return unwrap<PostView>(http.post('/api/posts', payload))
   },

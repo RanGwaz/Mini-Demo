@@ -25,6 +25,7 @@ import com.rangwaz.imagesocial.post.dto.PostAssetRequest;
 import com.rangwaz.imagesocial.post.dto.PostAssetView;
 import com.rangwaz.imagesocial.post.dto.PostView;
 import com.rangwaz.imagesocial.search.SearchIndexGateway;
+import com.rangwaz.imagesocial.taxonomy.ContentChannel;
 import com.rangwaz.imagesocial.user.UserService;
 import java.math.BigDecimal;
 import java.util.Arrays;
@@ -32,6 +33,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -79,14 +81,21 @@ public class PostService {
     @Transactional
     public PostView createPost(Long authorId, CreatePostRequest request) {
         User author = userService.requireById(authorId);
-        List<PostAssetRequest> assets = request.assets() == null ? List.of() : request.assets();
+        ContentChannel channel = resolveChannel(request.channel());
+        List<String> normalizedTags = normalizeTags(request.tags());
+        List<PostAssetRequest> assets = request.assets() == null
+                ? List.of()
+                : request.assets().stream().filter(Objects::nonNull).toList();
         PostAssetRequest firstAsset = assets.isEmpty() ? null : assets.get(0);
 
         Post post = new Post();
         post.setAuthorId(authorId);
         post.setTitle(request.title());
         post.setContent(request.content());
-        post.setTags(joinTags(request.tags()));
+        post.setTags(joinTags(normalizedTags));
+        post.setTopicPath(channel.topicPath());
+        post.setTopicClusterKey(channel.key());
+        post.setTaxonomyVersion(ContentChannel.TAXONOMY_VERSION);
         post.setCoverUrl(firstAsset == null ? "" : firstAsset.fileUrl());
         post.setThumbUrl(firstAsset == null ? null : firstAsset.thumbUrl());
         post.setVisibility("PUBLIC");
@@ -117,7 +126,7 @@ public class PostService {
                 authorId,
                 "POST",
                 post.getId(),
-                Map.of("title", post.getTitle(), "tags", request.tags() == null ? List.of() : request.tags())
+                Map.of("title", post.getTitle(), "channel", channel.key(), "tags", normalizedTags)
         );
         searchIndexGateway.syncPost(view);
         return view;
@@ -261,6 +270,9 @@ public class PostService {
     }
 
     private List<PostAssetView> mapAssets(List<PostAsset> assets) {
+        if (assets == null || assets.isEmpty()) {
+            return List.of();
+        }
         return assets.stream()
                 .map(asset -> new PostAssetView(
                         asset.getId(),
@@ -285,6 +297,7 @@ public class PostService {
                 post.getTitle(),
                 post.getContent(),
                 parseTags(post),
+                ContentChannel.fromPostTaxonomy(post.getTopicClusterKey(), post.getTopicPath()).key(),
                 post.getTopicPath(),
                 parseCsv(post.getSemanticTags()),
                 parseCsv(post.getStyleTags()),
@@ -300,6 +313,14 @@ public class PostService {
         );
     }
 
+    private ContentChannel resolveChannel(String channelKey) {
+        if (channelKey == null || channelKey.isBlank()) {
+            return ContentChannel.defaultChannel();
+        }
+        return ContentChannel.fromKey(channelKey)
+                .orElseThrow(() -> new BusinessException("频道不存在"));
+    }
+
     private List<String> parseCsv(String raw) {
         if (raw == null || raw.isBlank()) {
             return Collections.emptyList();
@@ -310,10 +331,25 @@ public class PostService {
                 .toList();
     }
 
-    private String joinTags(List<String> tags) {
+    private List<String> normalizeTags(List<String> tags) {
         if (tags == null || tags.isEmpty()) {
+            return List.of();
+        }
+        return tags.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .filter(value -> !ContentChannel.isChannelLabel(value))
+                .distinct()
+                .limit(10)
+                .toList();
+    }
+
+    private String joinTags(List<String> tags) {
+        List<String> normalizedTags = normalizeTags(tags);
+        if (normalizedTags.isEmpty()) {
             return "";
         }
-        return String.join(",", tags);
+        return String.join(",", normalizedTags);
     }
 }

@@ -72,6 +72,7 @@ export interface PostView {
   title: string
   content?: string
   tags: string[]
+  channel?: string
   topicPath?: string
   semanticTags?: string[]
   styleTags?: string[]

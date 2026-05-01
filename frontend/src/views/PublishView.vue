@@ -23,6 +23,13 @@ import {
 import { ElMessage } from 'element-plus'
 import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import {
+  defaultPublishChannelKey,
+  featuredAudienceChannels,
+  publishChannels,
+  tagGroups,
+  type PublishChannelKey,
+} from '../domain/contentTaxonomy'
 import { api } from '../services/api'
 import { useAuthStore } from '../stores/auth'
 import type { UploadResponse } from '../types'
@@ -41,6 +48,7 @@ const selectedKind = ref<PublishKind>('text')
 const previewMode = ref<PreviewMode>('desktop')
 const uploadedAssets = ref<UploadResponse[]>([])
 const customTag = ref('')
+const activeChannel = ref<PublishChannelKey>(defaultPublishChannelKey)
 const visibility = ref('公开 - 所有人可见')
 
 const form = reactive({
@@ -59,24 +67,13 @@ const drafts = [
   { title: '校园咖啡地图', time: '昨天 22:45', status: '已保存', image: 'https://picsum.photos/seed/draft-campus/120/90' },
 ]
 
-const tagGroups = [
-  {
-    title: '人群',
-    tags: ['大学生校园生活', '摄影爱好者', 'AI工具分享', '二次元穿搭', '宠物日常', '程序员摸鱼社区', '留学生生活'],
-  },
-  {
-    title: '内容形式',
-    tags: ['学习笔记', '日常记录', '经验分享', '效率工具', '穿搭灵感', '作品展示'],
-  },
-]
+const selectedTags = ref(['学习笔记', '效率工具'])
 
-const selectedTags = ref(['大学生校园生活', 'AI工具分享', '程序员摸鱼社区'])
-
-const syncCommunities = [
-  { name: '大学生校园生活', members: '12.8万成员', avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=campus' },
-  { name: 'AI工具分享', members: '8.2万成员', avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=ai-tools' },
-  { name: '程序员摸鱼社区', members: '7.7万成员', avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=dev-life' },
-]
+const syncCommunities = featuredAudienceChannels.slice(0, 3).map((channel) => ({
+  name: channel.label,
+  members: channel.signal.replace('活跃', '成员'),
+  avatar: `https://api.dicebear.com/9.x/adventurer/svg?seed=${channel.key}`,
+}))
 
 const aiTitleSuggestions = [
   '期末周也能稳住节奏的校园效率流',
@@ -84,7 +81,7 @@ const aiTitleSuggestions = [
   '从摸鱼到复盘：我的校园任务管理小方法',
 ]
 
-const aiTags = ['# 大学生校园生活', '# AI工具分享', '# 程序员摸鱼社区', '# 学习笔记', '# 效率工具']
+const aiTags = tagGroups.flatMap((group) => group.tags).slice(0, 5).map((tag) => `# ${tag}`)
 
 const previewComments = [
   { name: '课间小岛', text: '这个拆任务方法太适合期末周了', time: '12分钟前', avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=comment-1' },
@@ -93,6 +90,7 @@ const previewComments = [
 
 const titleCount = computed(() => form.title.length)
 const contentCount = computed(() => form.content.length)
+const currentChannelLabel = computed(() => publishChannels.find((item) => item.key === activeChannel.value)?.label || publishChannels[0]?.label || '综合')
 const currentUserName = computed(() => authStore.currentUser?.nickname || 'Vibelo 用户')
 const currentUserAvatar = computed(() => authStore.currentUser?.avatarUrl || 'https://api.dicebear.com/9.x/adventurer/svg?seed=creator')
 const hasImages = computed(() => uploadedAssets.value.length > 0)
@@ -117,6 +115,23 @@ function toggleTag(tag: string) {
 
 function removeTag(tag: string) {
   selectedTags.value = selectedTags.value.filter((item) => item !== tag)
+}
+
+function uniqueTags(tags: string[]) {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of tags) {
+    const normalized = item.trim()
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    result.push(normalized)
+  }
+  return result
+}
+
+function selectPublishChannel(channelKey: PublishChannelKey) {
+  if (activeChannel.value === channelKey) return
+  activeChannel.value = channelKey
 }
 
 function addCustomTag() {
@@ -180,19 +195,22 @@ async function submit() {
 
   loading.value = true
   try {
+    const finalTags = uniqueTags(selectedTags.value).slice(0, 10)
+    const assets = uploadedAssets.value.map((item, index) => ({
+      objectKey: item.objectKey,
+      fileUrl: item.fileUrl,
+      fileType: item.fileType,
+      thumbUrl: item.thumbUrl,
+      width: item.width,
+      height: item.height,
+      sortOrder: index,
+    }))
     await api.createPost({
       title: form.title.trim(),
       content: form.content.trim(),
-      tags: selectedTags.value,
-      assets: uploadedAssets.value.map((item, index) => ({
-        objectKey: item.objectKey,
-        fileUrl: item.fileUrl,
-        fileType: item.fileType,
-        thumbUrl: item.thumbUrl,
-        width: item.width,
-        height: item.height,
-        sortOrder: index,
-      })),
+      channel: activeChannel.value,
+      tags: finalTags,
+      ...(assets.length > 0 ? { assets } : {}),
     })
     sessionStorage.setItem('image-social-feed-need-refresh', '1')
     ElMessage.success('发布成功')
@@ -300,6 +318,21 @@ async function submit() {
 
         <section class="publish-studio__form-stack">
           <div class="publish-studio__row publish-studio__row--top">
+            <strong>频道</strong>
+            <div class="publish-studio__channel-tabs">
+              <button
+                v-for="channel in publishChannels"
+                :key="channel.key"
+                type="button"
+                :class="{ 'is-selected': activeChannel === channel.key }"
+                @click="selectPublishChannel(channel.key)"
+              >
+                {{ channel.label }}
+              </button>
+            </div>
+          </div>
+
+          <div class="publish-studio__row publish-studio__row--top">
             <strong>标签</strong>
             <div class="publish-studio__tag-panel">
               <div class="publish-studio__selected-tags">
@@ -392,7 +425,7 @@ async function submit() {
             <img :src="currentUserAvatar" alt="" />
             <div>
               <strong>{{ currentUserName }}</strong>
-              <small>刚刚 · {{ selectedKind === 'image' ? '图文' : '纯文字' }}</small>
+              <small>刚刚 · {{ selectedKind === 'image' ? '图文' : '纯文字' }} · {{ currentChannelLabel }}</small>
             </div>
             <el-icon><MoreFilled /></el-icon>
           </header>
@@ -836,6 +869,31 @@ async function submit() {
 .publish-studio__tag-panel {
   display: grid;
   gap: 12px;
+}
+
+.publish-studio__channel-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.publish-studio__channel-tabs button {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid #e8ebf0;
+  border-radius: 999px;
+  background: #fff;
+  color: #4e5665;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.publish-studio__channel-tabs button.is-selected {
+  border-color: #ffd4cc;
+  background: #fff0ed;
+  color: #ff5a45;
 }
 
 .publish-studio__selected-tags,
