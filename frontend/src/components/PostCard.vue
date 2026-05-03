@@ -6,6 +6,7 @@ import { useRouter } from 'vue-router'
 import { api } from '../services/api'
 import { useAuthStore } from '../stores/auth'
 import type { CommentView, PostView } from '../types'
+import { getPostMediaUrl, hasPostMedia } from '../utils/postMedia'
 
 const props = defineProps<{
   post: PostView
@@ -35,6 +36,8 @@ const favoritedByMe = ref(false)
 
 const isOwnPost = computed(() => authStore.currentUser?.id === props.post.author.id)
 const canShowDetailEntry = computed(() => props.showDetailEntry !== false)
+const coverUrl = computed(() => getPostMediaUrl(props.post))
+const hasMedia = computed(() => hasPostMedia(props.post))
 
 async function toggleLike() {
   if (!authStore.accessToken) {
@@ -217,7 +220,7 @@ function openAuthorProfile() {
     </div>
 
     <div class="post-card__body" @click="openDetail">
-      <img :src="post.thumbUrl || post.coverUrl" :alt="post.title" class="post-card__cover" />
+      <img v-if="hasMedia" :src="coverUrl" :alt="post.title" class="post-card__cover" />
       <div class="post-card__content">
         <h3>{{ post.title }}</h3>
         <p>{{ post.content || '作者没有填写正文。' }}</p>

@@ -18,6 +18,7 @@ import defaultProfileCover from '../assets/viewDesign/PC/light_index.png'
 import { api } from '../services/api'
 import { useAuthStore } from '../stores/auth'
 import type { PostView, UserStats, UserSummary } from '../types'
+import { getPostMediaUrl, hasPostMedia } from '../utils/postMedia'
 
 type SortMode = 'all' | 'latest' | 'hot'
 type ProfileTab = 'posts' | 'video' | 'favorite' | 'community' | 'replay' | 'about'
@@ -116,8 +117,7 @@ function normalizeMediaUrl(url?: string | null) {
 }
 
 function postImage(post: PostView) {
-  const asset = post.assets?.[0]
-  return normalizeMediaUrl(asset?.thumbUrl || post.thumbUrl || post.coverUrl || asset?.fileUrl) || '/auto_picture.png'
+  return getPostMediaUrl(post)
 }
 
 function formatCount(value?: number | null) {
@@ -313,8 +313,14 @@ onMounted(() => {
           <div v-else-if="filteredPosts.length === 0" class="profile-home__panel profile-home__empty">暂无内容</div>
 
           <div v-else class="profile-home__card-grid">
-            <article v-for="(item, index) in filteredPosts" :key="item.id" class="profile-home__card" @click="openPost(item.id)">
-              <div class="profile-home__card-cover">
+            <article
+              v-for="(item, index) in filteredPosts"
+              :key="item.id"
+              class="profile-home__card"
+              :class="{ 'is-text-only': !hasPostMedia(item) }"
+              @click="openPost(item.id)"
+            >
+              <div v-if="hasPostMedia(item)" class="profile-home__card-cover">
                 <img :src="postImage(item)" :alt="item.title || '帖子封面'" />
                 <span v-if="index % 4 === 2">Vlog</span>
               </div>
@@ -729,6 +735,22 @@ onMounted(() => {
 .profile-home__card:hover {
   transform: translateY(-2px);
   box-shadow: 0 14px 24px rgba(20, 25, 38, 0.09);
+}
+
+.profile-home__card.is-text-only {
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+}
+
+.profile-home__card.is-text-only .profile-home__card-body {
+  padding: 14px;
+}
+
+.profile-home__card.is-text-only .profile-home__card-body h3 {
+  -webkit-line-clamp: 3;
+}
+
+.profile-home__card.is-text-only .profile-home__card-body p {
+  -webkit-line-clamp: 6;
 }
 
 .profile-home__card-cover {

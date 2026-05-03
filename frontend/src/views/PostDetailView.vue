@@ -20,6 +20,15 @@ import { api, type FeedRequestAuthMode } from '../services/api'
 import { HttpError } from '../services/http'
 import { useAuthStore } from '../stores/auth'
 import type { CommentView, PostView } from '../types'
+import {
+  DEFAULT_IMAGE_PLACEHOLDER,
+  getPostFullMediaUrl,
+  getPostMediaAssets,
+  getPostMediaCandidates,
+  getPostMediaUrl,
+  hasPostMedia,
+  normalizeMediaUrl,
+} from '../utils/postMedia'
 
 const route = useRoute()
 const router = useRouter()
@@ -39,6 +48,7 @@ const commentsLoading = ref(false)
 const commentsPage = ref(1)
 const commentsHasMore = ref(true)
 const commentDraft = ref('')
+const lightboxOpen = ref(false)
 
 const relatedPosts = ref<PostView[]>([])
 const relatedLoading = ref(false)
@@ -58,29 +68,24 @@ let relatedObserver: IntersectionObserver | null = null
 const postId = computed(() => Number(route.params.id || 0))
 const authMode = computed<FeedRequestAuthMode>(() => (authStore.currentUser ? 'session' : 'guest'))
 const canFollow = computed(() => Boolean(post.value && authStore.currentUser && authStore.currentUser.id !== post.value.author.id))
-const authorAvatar = computed(() => normalizeMediaUrl(post.value?.author.avatarUrl) || '/auto_picture.png')
+const authorAvatar = computed(() => normalizeMediaUrl(post.value?.author.avatarUrl) || DEFAULT_IMAGE_PLACEHOLDER)
 
-const postAssets = computed(() => {
-  if (!post.value) return []
-  if (post.value.assets?.length) return post.value.assets
-  return [{ fileUrl: post.value.coverUrl, thumbUrl: post.value.thumbUrl }]
-})
+const postAssets = computed(() => getPostMediaAssets(post.value))
+const hasDetailMedia = computed(() => postAssets.value.length > 0)
 
 const activeCoverUrl = computed(() => {
   const current = post.value
-  if (!current) return '/auto_picture.png'
+  if (!current || !hasDetailMedia.value) return ''
   const fallback = coverFallbackMap.value[current.id]
-  if (fallback) return normalizeMediaUrl(fallback)
-  const asset = postAssets.value[Math.min(activeAssetIndex.value, postAssets.value.length - 1)]
-  return normalizeMediaUrl(asset?.thumbUrl || asset?.fileUrl || current.thumbUrl || current.coverUrl)
+  if (fallback) return fallback
+  return getPostMediaUrl(current, Math.min(activeAssetIndex.value, postAssets.value.length - 1))
 })
 
+const lightboxImageUrl = computed(() => {
+  if (!post.value || !hasDetailMedia.value) return ''
+  return getPostFullMediaUrl(post.value, Math.min(activeAssetIndex.value, postAssets.value.length - 1)) || activeCoverUrl.value
+})
 const relatedMasonryColumns = computed(() => distributeRelatedIntoColumns(relatedPosts.value))
-
-function normalizeMediaUrl(url?: string | null) {
-  if (!url) return '/auto_picture.png'
-  return url.replace('http://localhost:9000', '/minio-img')
-}
 
 function formatCount(value?: number | null) {
   const n = Number(value || 0)
@@ -109,19 +114,12 @@ function extractHashtags(postItem: PostView) {
 
 function resolveCover(postItem: PostView) {
   const fallback = coverFallbackMap.value[postItem.id]
-  if (fallback) return normalizeMediaUrl(fallback)
-  const firstAsset = postItem.assets?.[0]
-  return normalizeMediaUrl(firstAsset?.thumbUrl || postItem.thumbUrl || postItem.coverUrl || firstAsset?.fileUrl)
+  if (fallback) return fallback
+  return getPostMediaUrl(postItem)
 }
 
 function onPostCoverError(postItem: PostView) {
-  const firstAsset = postItem.assets?.[0]
-  const candidates = [
-    firstAsset?.thumbUrl,
-    postItem.thumbUrl,
-    postItem.coverUrl,
-    firstAsset?.fileUrl,
-  ].filter((item): item is string => Boolean(item))
+  const candidates = getPostMediaCandidates(postItem)
 
   for (const candidate of candidates) {
     if (coverFallbackMap.value[postItem.id] !== candidate) {
@@ -129,6 +127,15 @@ function onPostCoverError(postItem: PostView) {
       return
     }
   }
+}
+
+function openLightbox() {
+  if (!lightboxImageUrl.value) return
+  lightboxOpen.value = true
+}
+
+function closeLightbox() {
+  lightboxOpen.value = false
 }
 
 function backToFeed() {
@@ -186,6 +193,7 @@ function relatedCoverAspectRatio(postItem: PostView) {
 }
 
 function relatedEstimatedHeight(postItem: PostView) {
+  if (!hasPostMedia(postItem)) return 0.82
   const asset = postItem.assets?.[0]
   const width = Number(asset?.width || 0)
   const height = Number(asset?.height || 0)
@@ -402,6 +410,7 @@ async function loadDetail(targetId: number) {
   detailError.value = ''
   post.value = null
   activeAssetIndex.value = 0
+  lightboxOpen.value = false
   resetCommentState()
   resetRelatedState()
   const requestId = ++requestSerial
@@ -470,10 +479,11 @@ onUnmounted(() => {
           <button type="button" @click="loadDetail(postId)">重新加载</button>
         </div>
 
-        <div v-else-if="post" class="detail-page__panel">
-          <div class="detail-page__media">
+        <div v-else-if="post" class="detail-page__panel" :class="{ 'is-text-only': !hasDetailMedia }">
+          <div v-if="hasDetailMedia" class="detail-page__media">
             <div class="detail-page__media-wrap">
-              <img :src="activeCoverUrl" :alt="post.title || '作品封面'" @error="onPostCoverError(post)" />
+              <img :src="activeCoverUrl" :alt="post.title || '作品图片'" @click="openLightbox" @error="onPostCoverError(post)" />
+              <button type="button" class="detail-page__zoom-btn" @click="openLightbox">查看大图</button>
               <button v-if="postAssets.length > 1" type="button" class="detail-page__asset-arrow is-left" @click="showPrevAsset">
                 <el-icon><ArrowLeft /></el-icon>
               </button>
@@ -552,6 +562,17 @@ onUnmounted(() => {
             </section>
           </div>
         </div>
+
+        <div v-if="lightboxOpen && lightboxImageUrl" class="detail-page__lightbox" @click.self="closeLightbox">
+          <button type="button" class="detail-page__lightbox-close" aria-label="关闭大图" @click="closeLightbox">×</button>
+          <button v-if="postAssets.length > 1" type="button" class="detail-page__lightbox-arrow is-left" aria-label="上一张" @click="showPrevAsset">
+            <el-icon><ArrowLeft /></el-icon>
+          </button>
+          <img :src="lightboxImageUrl" :alt="post?.title || '作品图片'" />
+          <button v-if="postAssets.length > 1" type="button" class="detail-page__lightbox-arrow is-right" aria-label="下一张" @click="showNextAsset">
+            <el-icon><ArrowRight /></el-icon>
+          </button>
+        </div>
       </section>
 
       <section class="detail-page__related">
@@ -565,8 +586,14 @@ onUnmounted(() => {
 
         <div class="detail-page__related-waterfall" :style="{ '--column-count': String(relatedColumnCount) }">
           <div v-for="(column, columnIndex) in relatedMasonryColumns" :key="`related-col-${columnIndex}`" class="detail-page__related-column">
-            <article v-for="item in column" :key="item.id" class="detail-page__related-card" @click="openRelatedPost(item.id)">
-              <div class="detail-page__related-cover" :style="{ aspectRatio: relatedCoverAspectRatio(item) }">
+            <article
+              v-for="item in column"
+              :key="item.id"
+              class="detail-page__related-card"
+              :class="{ 'is-text-only': !hasPostMedia(item) }"
+              @click="openRelatedPost(item.id)"
+            >
+              <div v-if="hasPostMedia(item)" class="detail-page__related-cover" :style="{ aspectRatio: relatedCoverAspectRatio(item) }">
                 <img :src="resolveCover(item)" :alt="item.title || '帖子图片'" loading="lazy" @error="onPostCoverError(item)" />
               </div>
               <div class="detail-page__related-body">
@@ -664,6 +691,33 @@ onUnmounted(() => {
   gap: 18px;
 }
 
+.detail-page__panel.is-text-only {
+  grid-template-columns: minmax(0, 820px);
+  justify-content: center;
+}
+
+.detail-page__panel.is-text-only .detail-page__meta {
+  min-height: 520px;
+  padding: 18px 10px 4px;
+}
+
+.detail-page__panel.is-text-only .detail-page__content {
+  padding: 18px 0 10px;
+}
+
+.detail-page__panel.is-text-only .detail-page__content h1 {
+  max-width: 780px;
+  font-size: 34px;
+  line-height: 1.28;
+}
+
+.detail-page__panel.is-text-only .detail-page__content p {
+  max-width: 760px;
+  color: #303846;
+  font-size: 16px;
+  line-height: 1.9;
+}
+
 .detail-page__media-wrap {
   position: relative;
   overflow: hidden;
@@ -677,6 +731,23 @@ onUnmounted(() => {
   height: auto;
   aspect-ratio: 16 / 9;
   object-fit: cover;
+  cursor: zoom-in;
+}
+
+.detail-page__zoom-btn {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  height: 34px;
+  padding: 0 13px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(20, 24, 32, 0.72);
+  color: #fff;
+  cursor: zoom-in;
+  font-size: 13px;
+  font-weight: 700;
+  backdrop-filter: blur(10px);
 }
 
 .detail-page__asset-arrow {
@@ -715,6 +786,57 @@ onUnmounted(() => {
   width: 18px;
   background: #ff5a45;
 }
+
+.detail-page__lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 42px;
+  background: rgba(8, 10, 15, 0.88);
+}
+
+.detail-page__lightbox img {
+  display: block;
+  max-width: min(1180px, 92vw);
+  max-height: 88vh;
+  border-radius: 8px;
+  object-fit: contain;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
+}
+
+.detail-page__lightbox-close,
+.detail-page__lightbox-arrow {
+  position: fixed;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+}
+
+.detail-page__lightbox-close {
+  top: 24px;
+  right: 28px;
+  width: 42px;
+  height: 42px;
+  font-size: 26px;
+}
+
+.detail-page__lightbox-arrow {
+  top: 50%;
+  width: 46px;
+  height: 46px;
+  transform: translateY(-50%);
+  font-size: 20px;
+}
+
+.detail-page__lightbox-arrow.is-left { left: 28px; }
+.detail-page__lightbox-arrow.is-right { right: 28px; }
 
 .detail-page__meta {
   display: grid;
@@ -811,6 +933,8 @@ onUnmounted(() => {
   color: #4d5564;
   font-size: 15px;
   line-height: 1.72;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .detail-page__tags {
@@ -1007,6 +1131,22 @@ onUnmounted(() => {
   box-shadow: 0 12px 24px rgba(20, 25, 38, 0.09);
 }
 
+.detail-page__related-card.is-text-only {
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+}
+
+.detail-page__related-card.is-text-only .detail-page__related-body {
+  padding: 12px;
+}
+
+.detail-page__related-card.is-text-only h3 {
+  -webkit-line-clamp: 3;
+}
+
+.detail-page__related-card.is-text-only p {
+  -webkit-line-clamp: 5;
+}
+
 .detail-page__related-cover {
   overflow: hidden;
   background: #f1f3f7;
@@ -1133,6 +1273,23 @@ onUnmounted(() => {
 
   .detail-page__content p {
     font-size: 14px;
+  }
+
+  .detail-page__panel.is-text-only .detail-page__content h1 {
+    font-size: 24px;
+  }
+
+  .detail-page__panel.is-text-only .detail-page__content p {
+    font-size: 15px;
+  }
+
+  .detail-page__lightbox {
+    padding: 18px;
+  }
+
+  .detail-page__lightbox-arrow {
+    width: 40px;
+    height: 40px;
   }
 
   .detail-page__related-head h2 {
