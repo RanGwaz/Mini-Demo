@@ -304,6 +304,24 @@ public interface PostMapper extends BaseMapper<Post> {
 
     @Select("""
             <script>
+            SELECT tags, semantic_tags, style_tags
+            FROM posts
+            WHERE visibility = 'PUBLIC'
+              AND audit_status = 'APPROVED'
+              AND created_at <![CDATA[>=]]> DATE_SUB(NOW(), INTERVAL #{recentDays} DAY)
+              AND (
+                COALESCE(tags, '') != ''
+                OR COALESCE(semantic_tags, '') != ''
+                OR COALESCE(style_tags, '') != ''
+              )
+            ORDER BY hot_score DESC, created_at DESC
+            LIMIT #{limit}
+            </script>
+            """)
+    List<Post> selectRecentTagSamples(@Param("recentDays") int recentDays, @Param("limit") int limit);
+
+    @Select("""
+            <script>
             SELECT * FROM posts
             WHERE visibility = 'PUBLIC'
               AND audit_status = 'APPROVED'

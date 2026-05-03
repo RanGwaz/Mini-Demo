@@ -3,9 +3,7 @@ defineOptions({ name: 'FeedView' })
 
 import {
   ArrowRight,
-  Bell,
   ChatLineRound,
-  List,
   Search,
   Share,
 } from '@element-plus/icons-vue'
@@ -13,10 +11,23 @@ import { ElMessage } from 'element-plus'
 import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import CommonLeftSidebar from '../components/CommonLeftSidebar.vue'
+import {
+  feedChannelTabs as channelTabs,
+  feedModeTabs,
+  type FeedChannelKey as ChannelKey,
+  type FeedModeKey,
+} from '../domain/contentTaxonomy'
 import { api, type FeedRequestAuthMode } from '../services/api'
 import { HttpError } from '../services/http'
 import { useAuthStore } from '../stores/auth'
 import type { PostView, UserSummary } from '../types'
+import {
+  DEFAULT_IMAGE_PLACEHOLDER,
+  getPostMediaCandidates,
+  getPostMediaUrl,
+  hasPostMedia as postHasRealMedia,
+  normalizeMediaUrl as normalizePostMediaUrl,
+} from '../utils/postMedia'
 
 const FEED_ROWS_PER_PAGE = 3
 const FEED_INITIAL_VISIBLE_ROWS = 2
@@ -44,6 +55,8 @@ type FeedPageChunk = {
   records: PostView[]
   total?: number | null
   requestSize?: number
+  consumedPages?: number
+  sourceHasMore?: boolean
 }
 
 type FeedLoadSource = 'scroll' | 'background'
@@ -81,11 +94,14 @@ const prefetchedFeedPage = ref<{ page: number; data: FeedPageChunk } | null>(nul
 const prefetchingFeed = ref(false)
 const stagedFeedQueue = ref<PostView[]>([])
 const followSetLoading = ref(false)
+const friendSetLoading = ref(false)
 const bootstrapped = ref(false)
 const followSetResolvedUserId = ref<number | null>(null)
+const friendSetResolvedUserId = ref<number | null>(null)
 const feedRequestAuthMode = ref<FeedRequestAuthMode>('guest')
 const fallbackFeedNoticeShown = ref(false)
 const feedGuestFallbackActive = ref(false)
+const friendAuthorIds = ref<Set<number>>(new Set())
 
 const isSearchResults = computed(() => Boolean(displayQuery.value.trim()))
 const showInitialFeedSkeleton = computed(() => !bootstrapped.value || (feedInitialLoading.value && posts.value.length === 0))
@@ -94,23 +110,30 @@ const searchedMasonryColumns = computed(() => distributeIntoColumns(searchedPost
 const isGuestFallbackFeed = computed(() => Boolean(authStore.currentUser && feedGuestFallbackActive.value))
 const skeletonColumns = computed(() => buildFeedSkeletonColumns(columnCount.value, FEED_SKELETON_ROWS))
 const showProgressiveLoading = computed(() => feedLoadingMore.value || stagedFeedQueue.value.length > 0)
+const emptyFeedMessage = computed(() => {
+  if (isFollowingFeedMode() && !authStore.currentUser) return '登录后可查看关注动态'
+  if (isFriendsFeedMode() && !authStore.currentUser) return '登录后可查看朋友动态'
+  if (isFollowingFeedMode()) return '你关注的创作者暂时还没有新内容'
+  if (isFriendsFeedMode()) return '你的朋友暂时还没有发布动态'
+  if (activeChannel.value !== 'all') return `频道“${currentChannelMeta.value.label}”暂无内容`
+  return '暂时没有可展示的内容'
+})
 
-const feedTabs = ['推荐', '关注中', '视频', '图文', '热门话题', '同城', '朋友动态']
+const activeFeedMode = ref<FeedModeKey>('recommend')
+const activeChannel = ref<ChannelKey>('all')
 
-const hotTopics = [
-  { title: '春天的第一场旅行', heat: '128.5万热度' },
-  { title: '今日穿搭OOTD', heat: '96.3万热度' },
-  { title: '我的健身日常', heat: '85.7万热度' },
-  { title: '周末探店', heat: '72.1万热度' },
-  { title: '宠物的搞笑瞬间', heat: '64.8万热度' },
-]
+const currentChannelMeta = computed(() => (
+  channelTabs.find((item) => item.key === activeChannel.value) || channelTabs[0]
+))
+
+const audienceSegments = computed(() => channelTabs.filter((item) => item.key !== 'all' && item.key !== 'general'))
 
 const recommendedCreators = [
-  { name: '小海在旅行', bio: '旅行博主 | 风景记录者' },
-  { name: '卡卡要变强', bio: '健身达人 | 自律生活' },
-  { name: '吃货小圆', bio: '美食博主 | 探店爱好者' },
-  { name: '走走停停', bio: '摄影师 | 城市记录者' },
-  { name: '一只鹿鹿', bio: '穿搭博主 | 分享日常' },
+  { name: '课间小岛', bio: '大学生活 | 校园记录' },
+  { name: '快门慢慢按', bio: '摄影爱好者 | 扫街练习' },
+  { name: '漫展衣橱记', bio: '二次元穿搭 | 日常搭配' },
+  { name: '毛球观察室', bio: '宠物日常 | 养宠记录' },
+  { name: '留学厨房笔记', bio: '留学生生活 | 一人食' },
 ]
 
 let intersectionObserver: IntersectionObserver | null = null
@@ -146,6 +169,89 @@ function routeSearchKeyword() {
   return typeof q === 'string' ? q.trim() : ''
 }
 
+function routeQueryValue(value: unknown) {
+  if (Array.isArray(value)) return value[0] || ''
+  return typeof value === 'string' ? value : ''
+}
+
+function resolveFeedModeFromRoute(): FeedModeKey {
+  const value = routeQueryValue(route.query.feed)
+  return feedModeTabs.some((item) => item.key === value)
+    ? value as FeedModeKey
+    : 'recommend'
+}
+
+function resolveChannelFromRoute(): ChannelKey {
+  const value = routeQueryValue(route.query.channel)
+  return channelTabs.some((item) => item.key === value)
+    ? value as ChannelKey
+    : 'all'
+}
+
+function applyRouteFeedState() {
+  activeFeedMode.value = resolveFeedModeFromRoute()
+  activeChannel.value = resolveChannelFromRoute()
+}
+
+function syncFeedQueryToRoute() {
+  const nextQuery = { ...route.query } as Record<string, string | string[] | null | undefined>
+  if (activeFeedMode.value === 'recommend') delete nextQuery.feed
+  else nextQuery.feed = activeFeedMode.value
+  if (activeChannel.value === 'all') delete nextQuery.channel
+  else nextQuery.channel = activeChannel.value
+  void router.replace({ path: '/home', query: nextQuery })
+}
+
+function isFollowingFeedMode() {
+  return activeFeedMode.value === 'following'
+}
+
+function isFriendsFeedMode() {
+  return activeFeedMode.value === 'friends'
+}
+
+function currentChannelFilters() {
+  const meta = channelTabs.find((item) => item.key === activeChannel.value)
+  return meta?.filters
+}
+
+function normalizedText(value?: string | null) {
+  return (value || '').toLowerCase()
+}
+
+function postSearchTokens(post: PostView) {
+  const tokens = [
+    normalizedText(post.title),
+    normalizedText(post.content),
+    normalizedText(post.topicPath),
+    ...(post.tags || []).map((item) => normalizedText(item)),
+    ...(post.semanticTags || []).map((item) => normalizedText(item)),
+    ...(post.styleTags || []).map((item) => normalizedText(item)),
+  ].filter(Boolean)
+  return tokens.join(' ')
+}
+
+function postMatchesCurrentChannel(post: PostView) {
+  if (activeChannel.value === 'all') return true
+  const channel = channelTabs.find((item) => item.key === activeChannel.value)
+  if (!channel) return true
+  const haystack = postSearchTokens(post)
+  if (!haystack) return false
+  return channel.keywords.some((keyword) => haystack.includes(normalizedText(keyword)))
+}
+
+function postMatchesFeedMode(post: PostView) {
+  if (activeFeedMode.value === 'recommend') return true
+  if (!authStore.currentUser) return false
+  if (isFollowingFeedMode()) return followingAuthorIds.value.has(post.author.id)
+  if (isFriendsFeedMode()) return friendAuthorIds.value.has(post.author.id)
+  return true
+}
+
+function filterRecordsByActiveScope(records: PostView[]) {
+  return records.filter((post) => postMatchesFeedMode(post) && postMatchesCurrentChannel(post))
+}
+
 function navigationType() {
   const entry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
   return entry?.type || ''
@@ -173,7 +279,7 @@ function resetFeedRequestAuthMode() {
 }
 
 function normalizeMediaUrl(url?: string | null) {
-  if (!url) return '/auto_picture.png'
+  if (!url) return DEFAULT_IMAGE_PLACEHOLDER
   return url.replace('http://localhost:9000', '/minio-img')
 }
 
@@ -212,7 +318,7 @@ function formatFeedTime(createdAt?: string) {
 
 function creatorAvatar(index: number) {
   const sample = posts.value[index % Math.max(1, posts.value.length)]
-  return sample ? resolveFeedCover(sample) : '/auto_picture.png'
+  return normalizePostMediaUrl(sample?.author.avatarUrl) || DEFAULT_IMAGE_PLACEHOLDER
 }
 
 function computeColumnCount() {
@@ -400,6 +506,8 @@ function coverAspectRatio(postId: number) {
 }
 
 function estimatedCardHeight(post: PostView) {
+  if (!postHasRealMedia(post)) return 0.72
+
   const asset = post.assets?.[0]
   const width = Number(asset?.width || 0)
   const height = Number(asset?.height || 0)
@@ -433,28 +541,20 @@ function getCoverAspectRatio(post: PostView) {
   return width > 0 && height > 0 ? `${width} / ${height}` : coverAspectRatio(post.id)
 }
 
+function hasPostMedia(post: PostView) {
+  return postHasRealMedia(post)
+}
+
 function markFeedCoverLoaded(postId: number) {
   loadedCoversSet.value = new Set([...loadedCoversSet.value, postId])
 }
 
 function resolveFeedCover(post: PostView) {
-  const asset = post.assets?.[0]
-  const raw = coverFallbackMap.value[post.id]
-    || asset?.thumbUrl
-    || post.thumbUrl
-    || post.coverUrl
-    || asset?.fileUrl
-    || '/auto_picture.png'
-  return normalizeMediaUrl(raw)
+  return coverFallbackMap.value[post.id] || getPostMediaUrl(post)
 }
 
 function handleFeedCoverError(post: PostView) {
-  const candidates = [
-    post.assets?.[0]?.thumbUrl,
-    post.thumbUrl,
-    post.coverUrl,
-    post.assets?.[0]?.fileUrl,
-  ].filter((item): item is string => Boolean(item))
+  const candidates = getPostMediaCandidates(post)
 
   for (const candidate of candidates) {
     if (coverFallbackMap.value[post.id] !== candidate) {
@@ -517,6 +617,41 @@ async function loadFollowSet() {
   }
 }
 
+async function loadFriendSet() {
+  if (!authStore.currentUser) {
+    friendAuthorIds.value = new Set()
+    friendSetResolvedUserId.value = null
+    return
+  }
+  if (friendSetLoading.value || friendSetResolvedUserId.value === authStore.currentUser.id) return
+  friendSetLoading.value = true
+  try {
+    const [following, followers] = await Promise.all([
+      api.following(authStore.currentUser.id),
+      api.followers(authStore.currentUser.id),
+    ])
+    const followerIds = new Set(followers.map((item) => item.id))
+    friendAuthorIds.value = new Set(following.map((item) => item.id).filter((id) => followerIds.has(id)))
+    followingAuthorIds.value = new Set(following.map((item) => item.id))
+    friendSetResolvedUserId.value = authStore.currentUser.id
+    followSetResolvedUserId.value = authStore.currentUser.id
+  } catch {
+    friendAuthorIds.value = new Set()
+  } finally {
+    friendSetLoading.value = false
+  }
+}
+
+async function ensureFeedScopeDependencies() {
+  if (isFollowingFeedMode()) {
+    await loadFollowSet()
+    return
+  }
+  if (isFriendsFeedMode()) {
+    await loadFriendSet()
+  }
+}
+
 function resetFeedState() {
   clearFeedRevealQueue()
   resetBackgroundFeedWarmup()
@@ -540,7 +675,7 @@ type FeedCachePayload = {
 }
 
 function currentFeedCacheKey() {
-  return `image-social-feed-cache:${authStore.currentUser?.id || 'guest'}:all`
+  return `image-social-feed-cache:${authStore.currentUser?.id || 'guest'}:${activeFeedMode.value}:${activeChannel.value}`
 }
 
 function restoreFeedFromCache() {
@@ -604,6 +739,8 @@ function rememberPrefetchedPage(page: number, data: FeedPageChunk) {
       records: data.records || [],
       total: typeof data.total === 'number' ? data.total : null,
       requestSize: data.requestSize,
+      consumedPages: data.consumedPages,
+      sourceHasMore: data.sourceHasMore,
     },
   }
 }
@@ -620,12 +757,12 @@ async function prefetchFeedPage(page: number) {
   if (prefetchedFeedPage.value?.page === page) return
   if (posts.value.length >= FEED_MAX_ITEMS) return
 
-  const prefetchSignature = `${feedSeed.value}|${displayQuery.value}`
+  const prefetchSignature = `${feedSeed.value}|${displayQuery.value}|${activeFeedMode.value}|${activeChannel.value}`
   const requestSize = currentFeedPageSize()
   prefetchingFeed.value = true
   try {
     const data = await requestFeedPage(page, requestSize)
-    const latestSignature = `${feedSeed.value}|${displayQuery.value}`
+    const latestSignature = `${feedSeed.value}|${displayQuery.value}|${activeFeedMode.value}|${activeChannel.value}`
     if (latestSignature !== prefetchSignature) return
     rememberPrefetchedPage(page, { ...data, requestSize })
   } catch {
@@ -636,7 +773,8 @@ async function prefetchFeedPage(page: number) {
 }
 
 function applyLoadedFeedPage(page: number, data: FeedPageChunk) {
-  feedNextPage.value = page + 1
+  const consumedPages = Math.max(1, Number(data.consumedPages || 1))
+  feedNextPage.value = page + consumedPages
   const requestSize = data.requestSize || currentFeedPageSize()
 
   const orderedBatch = data.records || []
@@ -647,8 +785,9 @@ function applyLoadedFeedPage(page: number, data: FeedPageChunk) {
   }
 
   if (typeof data.total === 'number') total.value = data.total
-  const serverHasMore = (data.records || []).length >= requestSize
-    || (typeof data.total === 'number' && page * requestSize < data.total)
+  const serverHasMore = typeof data.sourceHasMore === 'boolean'
+    ? data.sourceHasMore
+    : computeServerHasMore(page, requestSize, data.records || [], data.total)
   feedHasMore.value = serverHasMore && posts.value.length < FEED_MAX_ITEMS
 }
 
@@ -666,14 +805,15 @@ function isStaleSessionUserError(error: unknown) {
   return error instanceof HttpError && error.code === 'U001'
 }
 
-async function requestFeedPage(page: number, requestSize = currentFeedPageSize()): Promise<FeedPageChunk> {
+async function requestFeedPageRaw(page: number, requestSize = currentFeedPageSize()): Promise<FeedPageChunk> {
+  const filters = currentChannelFilters()
   if (feedRequestAuthMode.value === 'guest') {
-    const data = await api.homeFeed(page, requestSize, feedSeed.value, undefined, 'guest')
+    const data = await api.homeFeed(page, requestSize, feedSeed.value, filters, 'guest')
     return { ...data, requestSize }
   }
 
   try {
-    const data = await api.homeFeed(page, requestSize, feedSeed.value, undefined, 'session')
+    const data = await api.homeFeed(page, requestSize, feedSeed.value, filters, 'session')
     feedGuestFallbackActive.value = false
     return { ...data, requestSize }
   } catch (error) {
@@ -684,7 +824,7 @@ async function requestFeedPage(page: number, requestSize = currentFeedPageSize()
       feedGuestFallbackActive.value = false
       fallbackFeedNoticeShown.value = true
       prefetchedFeedPage.value = null
-      const data = await api.homeFeed(page, requestSize, feedSeed.value, undefined, 'guest')
+      const data = await api.homeFeed(page, requestSize, feedSeed.value, filters, 'guest')
       return { ...data, requestSize }
     }
     feedGuestFallbackActive.value = true
@@ -693,8 +833,63 @@ async function requestFeedPage(page: number, requestSize = currentFeedPageSize()
       fallbackFeedNoticeShown.value = true
       ElMessage.warning('个性化推荐暂时较慢，已切换为探索流')
     }
-    const data = await api.homeFeed(page, requestSize, feedSeed.value, undefined, 'guest')
+    const data = await api.homeFeed(page, requestSize, feedSeed.value, filters, 'guest')
     return { ...data, requestSize }
+  }
+}
+
+function computeServerHasMore(page: number, requestSize: number, records: PostView[], totalValue?: number | null) {
+  return records.length >= requestSize
+    || (typeof totalValue === 'number' && page * requestSize < totalValue)
+}
+
+async function requestFeedPage(page: number, requestSize = currentFeedPageSize()): Promise<FeedPageChunk> {
+  if ((isFollowingFeedMode() || isFriendsFeedMode()) && !authStore.currentUser) {
+    return {
+      records: [],
+      total: 0,
+      requestSize,
+      consumedPages: 1,
+      sourceHasMore: false,
+    }
+  }
+
+  await ensureFeedScopeDependencies()
+
+  const needExtraScan = isFollowingFeedMode() || isFriendsFeedMode() || activeChannel.value !== 'all'
+  if (!needExtraScan) {
+    const data = await requestFeedPageRaw(page, requestSize)
+    return {
+      ...data,
+      records: filterRecordsByActiveScope(data.records || []),
+      consumedPages: 1,
+      sourceHasMore: computeServerHasMore(page, requestSize, data.records || [], data.total),
+    }
+  }
+
+  const maxSweepPages = 5
+  let cursor = page
+  let consumedPages = 0
+  let aggregated: PostView[] = []
+  let totalValue: number | null = null
+  let hasMore = true
+
+  while (hasMore && consumedPages < maxSweepPages && aggregated.length < requestSize) {
+    const data = await requestFeedPageRaw(cursor, requestSize)
+    const filtered = filterRecordsByActiveScope(data.records || [])
+    aggregated = dedupeRecords([...aggregated, ...filtered]).slice(0, requestSize)
+    if (typeof data.total === 'number') totalValue = data.total
+    hasMore = computeServerHasMore(cursor, requestSize, data.records || [], data.total)
+    cursor += 1
+    consumedPages += 1
+  }
+
+  return {
+    records: aggregated,
+    total: totalValue,
+    requestSize,
+    consumedPages: Math.max(1, consumedPages),
+    sourceHasMore: hasMore,
   }
 }
 
@@ -852,7 +1047,7 @@ async function runSearch() {
   }
 }
 
-function clearSearchResults() {
+function clearSearchResults(reload = true) {
   keyword.value = ''
   displayQuery.value = ''
   searchResultsTab.value = 'posts'
@@ -862,7 +1057,25 @@ function clearSearchResults() {
   coverFallbackMap.value = {}
   prefetchedFeedPage.value = null
   resetBackgroundFeedWarmup()
-  void loadInitialFeed()
+  if (reload) void loadInitialFeed()
+}
+
+async function reloadFeedByScope() {
+  feedRequestSerial += 1
+  feedInitialLoading.value = false
+  feedLoadingMore.value = false
+  if (isSearchResults.value) clearSearchResults(false)
+  refreshFeedSeed()
+  resetFeedState()
+  await loadInitialFeed()
+  window.scrollTo({ top: 0, behavior: 'auto' })
+}
+
+function selectChannel(channel: ChannelKey) {
+  if (activeChannel.value === channel) return
+  activeChannel.value = channel
+  syncFeedQueryToRoute()
+  void reloadFeedByScope()
 }
 
 async function handleToggleFollow(authorId: number) {
@@ -929,6 +1142,19 @@ watch(
 )
 
 watch(
+  () => [route.query.feed, route.query.channel] as const,
+  async () => {
+    if (!bootstrapped.value) return
+    const nextMode = resolveFeedModeFromRoute()
+    const nextChannel = resolveChannelFromRoute()
+    if (nextMode === activeFeedMode.value && nextChannel === activeChannel.value) return
+    activeFeedMode.value = nextMode
+    activeChannel.value = nextChannel
+    await reloadFeedByScope()
+  },
+)
+
+watch(
   () => [searchResultsTab.value, searchedUsers.value.length, authStore.currentUser?.id] as const,
   ([tab, count, userId]) => {
     if (tab !== 'users' || count === 0 || !userId) return
@@ -941,7 +1167,9 @@ watch(
   (nextId, previousId) => {
     if (nextId === previousId) return
     followingAuthorIds.value = new Set()
+    friendAuthorIds.value = new Set()
     followSetResolvedUserId.value = null
+    friendSetResolvedUserId.value = null
     resetFeedRequestAuthMode()
     if (!bootstrapped.value) return
     if (!isSearchResults.value) {
@@ -954,6 +1182,7 @@ watch(
 
 onMounted(async () => {
   resetFeedRequestAuthMode()
+  applyRouteFeedState()
   updateColumnCount()
   const navType = navigationType()
   const shouldRealtimeRefresh = consumeRealtimeRefreshFlag()
@@ -1019,21 +1248,6 @@ onUnmounted(() => {
 
     <main class="feed-home__main">
       <section class="feed-home__content-panel">
-        <div class="feed-home__tabs-row">
-          <div class="feed-home__tabs" role="tablist" aria-label="内容分类">
-            <button v-for="tab in feedTabs" :key="tab" type="button" class="feed-home__tab"
-              :class="{ 'is-active': tab === '推荐' && !isSearchResults }"
-              @click="tab === '推荐' ? clearSearchResults() : undefined">
-              {{ tab }}
-            </button>
-          </div>
-          <button type="button" class="feed-home__layout-btn" aria-label="切换布局">
-            <el-icon>
-              <List />
-            </el-icon>
-          </button>
-        </div>
-
         <div v-if="isGuestFallbackFeed" class="feed-home__fallback-banner">
           个性化推荐暂时较慢，当前展示探索流。
         </div>
@@ -1077,7 +1291,7 @@ onUnmounted(() => {
               <div v-for="(column, columnIndex) in masonryColumns" :key="`col-${columnIndex}`"
                 class="feed-home__column">
                 <article v-for="post in column" :key="post.id" class="feed-home__card" @click="navigateToPost(post.id)">
-                  <div class="feed-home__card-media">
+                  <div v-if="hasPostMedia(post)" class="feed-home__card-media">
                     <div v-if="!isFeedCoverLoaded(post.id)" class="feed-home__card-skeleton ui-skeleton"
                       :style="{ aspectRatio: getCoverAspectRatio(post) }" />
                     <img class="feed-home__card-image" :class="{ 'is-visible': isFeedCoverLoaded(post.id) }"
@@ -1086,7 +1300,7 @@ onUnmounted(() => {
                   </div>
                   <div class="feed-home__card-body">
                     <div class="feed-home__card-author">
-                      <img :src="resolveFeedCover(post)" alt="" />
+                      <img :src="normalizeMediaUrl(post.author.avatarUrl)" alt="" />
                       <span>
                         <strong>{{ post.author.nickname }}</strong>
                         <small>{{ formatFeedTime(post.createdAt) }}</small>
@@ -1131,7 +1345,7 @@ onUnmounted(() => {
             </p>
           </div>
 
-          <div v-else class="ui-state ui-state--empty feed-home__state">暂时没有可展示的内容</div>
+          <div v-else class="ui-state ui-state--empty feed-home__state">{{ emptyFeedMessage }}</div>
         </template>
 
         <template v-else-if="searchResultsTab === 'posts'">
@@ -1141,7 +1355,7 @@ onUnmounted(() => {
               <div v-for="(column, columnIndex) in searchedMasonryColumns" :key="`search-col-${columnIndex}`"
                 class="feed-home__column">
                 <article v-for="post in column" :key="post.id" class="feed-home__card" @click="navigateToPost(post.id)">
-                  <div class="feed-home__card-media">
+                  <div v-if="hasPostMedia(post)" class="feed-home__card-media">
                     <div v-if="!isFeedCoverLoaded(post.id)" class="feed-home__card-skeleton ui-skeleton"
                       :style="{ aspectRatio: getCoverAspectRatio(post) }" />
                     <img class="feed-home__card-image" :class="{ 'is-visible': isFeedCoverLoaded(post.id) }"
@@ -1192,16 +1406,17 @@ onUnmounted(() => {
     <aside class="feed-home__right-rail" aria-label="推荐信息">
       <section class="feed-home__right-card">
         <div class="feed-home__right-title">
-          <strong>热门话题</strong>
+          <strong>人群频道</strong>
           <button type="button">更多 <el-icon>
               <ArrowRight />
             </el-icon></button>
         </div>
         <ol class="feed-home__topic-list">
-          <li v-for="(topic, index) in hotTopics" :key="topic.title">
+          <li v-for="(segment, index) in audienceSegments" :key="segment.key"
+            :class="{ 'is-active': segment.key === activeChannel }" @click="selectChannel(segment.key)">
             <span>{{ index + 1 }}</span>
-            <strong>{{ topic.title }}</strong>
-            <em>{{ topic.heat }}</em>
+            <strong>{{ segment.label }}</strong>
+            <em>{{ segment.signal }}</em>
           </li>
         </ol>
       </section>
@@ -1221,28 +1436,6 @@ onUnmounted(() => {
             <button type="button">关注</button>
           </article>
         </div>
-      </section>
-
-      <section class="feed-home__right-card feed-home__live-card">
-        <div class="feed-home__right-title">
-          <strong>正在直播</strong>
-          <button type="button">更多直播 <el-icon>
-              <ArrowRight />
-            </el-icon></button>
-        </div>
-        <article>
-          <div class="feed-home__live-cover">
-            <img :src="creatorAvatar(1)" alt="" />
-            <span><el-icon>
-                <Bell />
-              </el-icon> LIVE</span>
-          </div>
-          <div>
-            <strong>周末一起云健身</strong>
-            <small>新手友好 · 燃脂训练</small>
-            <em>2.3万人在看</em>
-          </div>
-        </article>
       </section>
 
       <footer class="feed-home__footer-card">
@@ -1480,15 +1673,18 @@ onUnmounted(() => {
   position: sticky;
   top: 74px;
   z-index: 30;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   padding: 0 0 12px;
+  border-bottom: 1px solid #eef1f5;
+  margin-bottom: 12px;
   background: #fff;
 }
 
 .feed-home__tabs {
+  z-index: 29;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1501,18 +1697,34 @@ onUnmounted(() => {
   display: none;
 }
 
+.feed-home__tab-block-title {
+  color: #8c92a1;
+  font-size: 12px;
+  font-weight: 680;
+  line-height: 1;
+}
+
+.feed-home__tabs--channel {
+  gap: 8px;
+}
+
 .feed-home__tab {
   flex: 0 0 auto;
-  min-height: 34px;
-  padding: 0 18px;
+  min-height: 32px;
+  padding: 0 14px;
   border: 1px solid #e7eaf0;
   border-radius: 999px;
   background: #fff;
   color: #222733;
-  font-size: 14px;
-  font-weight: 720;
+  font-size: 13px;
+  font-weight: 690;
   cursor: pointer;
   transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.feed-home__tab--channel {
+  min-width: max-content;
+  padding: 0 12px;
 }
 
 .feed-home__tab:hover,
@@ -1839,6 +2051,15 @@ onUnmounted(() => {
   grid-template-columns: 20px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.16s ease;
+}
+
+.feed-home__topic-list li:hover,
+.feed-home__topic-list li.is-active {
+  background: #fff1ed;
 }
 
 .feed-home__topic-list span {
@@ -2121,6 +2342,10 @@ onUnmounted(() => {
     top: 62px;
   }
 
+  .feed-home__channel-row {
+    top: 114px;
+  }
+
   .feed-home__user-card {
     grid-template-columns: auto minmax(0, 1fr);
   }
@@ -2171,6 +2396,12 @@ onUnmounted(() => {
 
   .feed-home__tabs-row {
     align-items: flex-start;
+  }
+
+  .feed-home__channel-row {
+    top: 108px;
+    grid-template-columns: 1fr;
+    gap: 8px;
   }
 
   .feed-home__tab {

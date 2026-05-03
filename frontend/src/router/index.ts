@@ -12,7 +12,7 @@ const router = createRouter({
   routes: [
     {
       path: '/',
-      redirect: '/feed',
+      redirect: '/home',
     },
     {
       path: '/login',
@@ -23,6 +23,11 @@ const router = createRouter({
     {
       path: '/feed',
       name: 'feed',
+      component: FeedView,
+    },
+    {
+      path: '/home',
+      name: 'home',
       component: FeedView,
     },
     {
@@ -59,7 +64,7 @@ router.beforeEach((to) => {
     return false
   }
   if (to.name === 'login') {
-    return authStore.accessToken ? { name: 'feed' } : { name: 'feed', query: { auth: '1' } }
+    return authStore.accessToken ? { name: 'home' } : { name: 'home', query: { auth: '1' } }
   }
   return true
 })

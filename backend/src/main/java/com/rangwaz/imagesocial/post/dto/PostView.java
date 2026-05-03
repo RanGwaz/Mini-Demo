@@ -10,6 +10,7 @@ public record PostView(
         String title,
         String content,
         List<String> tags,
+        String channel,
         String topicPath,
         List<String> semanticTags,
         List<String> styleTags,

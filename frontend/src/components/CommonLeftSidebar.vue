@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import {
   ArrowRight,
-  Clock,
-  Compass,
+  Brush,
+  Camera,
   HomeFilled,
-  Location,
+  Notebook,
+  Opportunity,
+  School,
   Star,
-  TrendCharts,
   UserFilled,
 } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
+import { contentChannels, type ContentChannelKey } from '../domain/contentTaxonomy'
 
 const props = withDefaults(defineProps<{
   fixed?: boolean
@@ -21,45 +22,73 @@ const props = withDefaults(defineProps<{
 const router = useRouter()
 const route = useRoute()
 
-const navItems = [
-  { key: 'recommend', label: '为你推荐', icon: HomeFilled, path: '/feed' },
-  { key: 'hot', label: '热门', icon: TrendCharts },
-  { key: 'city', label: '同城', icon: Location },
-  { key: 'friends', label: '朋友', icon: UserFilled },
-  { key: 'favorite', label: '收藏', icon: Star },
-  { key: 'later', label: '稍后再看', icon: Clock },
-  { key: 'community', label: '社群', icon: Compass },
-] satisfies Array<{
+const channelIcons: Record<ContentChannelKey, typeof HomeFilled> = {
+  general: HomeFilled,
+  campus_life: Notebook,
+  photography: Camera,
+  anime_outfit: Brush,
+  pets: Opportunity,
+  overseas: School,
+}
+
+type NavItem = {
   key: string
   label: string
   icon: typeof HomeFilled
-  path?: string
-  badge?: string
-}>
-
-const followedCommunities = [
-  { name: '旅行日记', members: '26.5万成员', badge: '99+', avatar: 'https://picsum.photos/seed/sidebar-travel/80/80' },
-  { name: '健身打卡', members: '15.3万成员', badge: '6', avatar: 'https://picsum.photos/seed/sidebar-fitness/80/80' },
-  { name: '数码玩家', members: '12.9万成员', badge: '3', avatar: 'https://picsum.photos/seed/sidebar-digital/80/80' },
-  { name: '摄影世界', members: '8.7万成员', badge: '2', avatar: 'https://picsum.photos/seed/sidebar-photo/80/80' },
-]
-
-function isActive(itemPath?: string) {
-  if (!itemPath) return false
-  if (itemPath === '/feed') return route.path === '/feed' || route.path.startsWith('/posts/')
-  return route.path === itemPath
+  query: { feed?: string; channel?: string }
 }
 
-function handleNav(item: (typeof navItems)[number]) {
-  if (item.path) {
-    if (isActive(item.path)) {
-      window.scrollTo({ top: 0, behavior: 'smooth' })
-      return
-    }
-    void router.push(item.path)
+const navItems: NavItem[] = [
+  { key: 'recommend', label: '为你推荐', icon: HomeFilled, query: { feed: 'recommend' } },
+  { key: 'following', label: '关注', icon: UserFilled, query: { feed: 'following' } },
+  { key: 'friends', label: '朋友动态', icon: Star, query: { feed: 'friends' } },
+  ...contentChannels.map((channel) => ({
+    key: channel.key,
+    label: channel.label,
+    icon: channelIcons[channel.key],
+    query: { channel: channel.key },
+  })),
+]
+
+const audienceRows = contentChannels.filter((channel) => channel.key !== 'general').slice(2, 5)
+
+function routeQueryValue(value: unknown) {
+  if (Array.isArray(value)) return value[0] || ''
+  return typeof value === 'string' ? value : ''
+}
+
+function feedHomePath() {
+  return '/home'
+}
+
+function navQuery(item: NavItem) {
+  const query: Record<string, string> = {}
+  const feed = item.query.feed
+  const channel = item.query.channel
+  if (feed && feed !== 'recommend') query.feed = feed
+  if (channel && channel !== 'all') query.channel = channel
+  return query
+}
+
+function isActive(item: NavItem) {
+  if (!(route.path === '/feed' || route.path === '/home' || route.path.startsWith('/posts/'))) return false
+  const currentFeed = routeQueryValue(route.query.feed) || 'recommend'
+  const currentChannel = routeQueryValue(route.query.channel) || 'all'
+  if (item.query.feed) return currentChannel === 'all' && currentFeed === item.query.feed
+  if (item.query.channel) return currentChannel === item.query.channel
+  return false
+}
+
+function handleNav(item: NavItem) {
+  if (isActive(item)) {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
     return
   }
-  ElMessage.info(`${item.label} 功能正在完善中`)
+  void router.push({ path: feedHomePath(), query: navQuery(item) })
+}
+
+function jumpToChannel(channel: string) {
+  void router.push({ path: feedHomePath(), query: { channel } })
 }
 </script>
 
@@ -71,7 +100,7 @@ function handleNav(item: (typeof navItems)[number]) {
         :key="item.key"
         type="button"
         class="common-left-rail__side-item"
-        :class="{ 'is-active': isActive(item.path) }"
+        :class="{ 'is-active': isActive(item) }"
         @click="handleNav(item)"
       >
         <el-icon><component :is="item.icon" /></el-icon>
@@ -81,7 +110,7 @@ function handleNav(item: (typeof navItems)[number]) {
 
     <section class="common-left-rail__community">
       <div class="common-left-rail__title">
-        <span>我关注的社群</span>
+        <span>细分人群</span>
         <button type="button">
           更多
           <el-icon><ArrowRight /></el-icon>
@@ -89,20 +118,18 @@ function handleNav(item: (typeof navItems)[number]) {
       </div>
 
       <button
-        v-for="community in followedCommunities"
-        :key="community.name"
+        v-for="audience in audienceRows"
+        :key="audience.key"
         type="button"
         class="common-left-rail__community-row"
+        @click="jumpToChannel(audience.key)"
       >
-        <img :src="community.avatar" alt="" />
+        <img :src="audience.avatar" alt="" />
         <span>
-          <strong>{{ community.name }}</strong>
-          <small>{{ community.members }}</small>
+          <strong>{{ audience.label }}</strong>
+          <small>{{ audience.signal }}</small>
         </span>
-        <em>{{ community.badge }}</em>
       </button>
-
-      <button type="button" class="common-left-rail__create-community">+ 创建社群</button>
     </section>
   </aside>
 </template>
@@ -135,8 +162,7 @@ function handleNav(item: (typeof navItems)[number]) {
 }
 
 .common-left-rail__side-item,
-.common-left-rail__community-row,
-.common-left-rail__create-community {
+.common-left-rail__community-row {
   width: 100%;
   border: none;
   background: transparent;
@@ -160,17 +186,6 @@ function handleNav(item: (typeof navItems)[number]) {
 .common-left-rail__side-item .el-icon {
   flex: 0 0 auto;
   font-size: 20px;
-}
-
-.common-left-rail__side-item em {
-  margin-left: auto;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: #fff1ed;
-  color: #ff5a45;
-  font-style: normal;
-  font-size: 11px;
-  font-weight: 800;
 }
 
 .common-left-rail__side-item:hover,
@@ -210,7 +225,7 @@ function handleNav(item: (typeof navItems)[number]) {
 
 .common-left-rail__community-row {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 34px minmax(0, 1fr);
   align-items: center;
   gap: 9px;
   padding: 8px 2px;
@@ -245,32 +260,6 @@ function handleNav(item: (typeof navItems)[number]) {
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.common-left-rail__community-row em {
-  min-width: 22px;
-  padding: 2px 5px;
-  border-radius: 999px;
-  background: #ff5a45;
-  color: #fff;
-  font-style: normal;
-  font-size: 11px;
-  font-weight: 800;
-  text-align: center;
-}
-
-.common-left-rail__create-community {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 36px;
-  margin-top: 10px;
-  border-radius: 8px;
-  background: #fff1ed;
-  color: #ff5a45;
-  font-size: 13px;
-  font-weight: 760;
 }
 
 @media (max-width: 1280px) {

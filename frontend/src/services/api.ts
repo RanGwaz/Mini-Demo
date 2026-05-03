@@ -30,9 +30,22 @@ export interface CreatePostAssetPayload {
 export interface FeedQueryFilters {
   topic?: string
   style?: string
+  tag?: string
 }
 
 export type FeedRequestAuthMode = 'session' | 'guest'
+
+export interface PublishTagSuggestion {
+  name: string
+  heat: string
+  postCount: number
+  source: string
+}
+
+export interface PublishSuggestionsResponse {
+  quickTags: string[]
+  trendingTags: PublishTagSuggestion[]
+}
 
 const slowRequestConfig = {
   timeout: LONG_REQUEST_TIMEOUT_MS,
@@ -73,6 +86,7 @@ export const api = {
         ...(seed ? { seed } : {}),
         ...(filters?.topic ? { topic: filters.topic } : {}),
         ...(filters?.style ? { style: filters.style } : {}),
+        ...(filters?.tag ? { tag: filters.tag } : {}),
       },
     }))
   },
@@ -85,6 +99,7 @@ export const api = {
         size,
         ...(filters?.topic ? { topic: filters.topic } : {}),
         ...(filters?.style ? { style: filters.style } : {}),
+        ...(filters?.tag ? { tag: filters.tag } : {}),
       },
     }))
   },
@@ -100,10 +115,19 @@ export const api = {
   createPost(payload: {
     title: string
     content: string
-    tags: string[]
-    assets: CreatePostAssetPayload[]
+    channel: string
+    tags?: string[]
+    assets?: CreatePostAssetPayload[]
   }) {
     return unwrap<PostView>(http.post('/api/posts', payload))
+  },
+  publishSuggestions(channel?: string, keyword?: string) {
+    return unwrap<PublishSuggestionsResponse>(guestHttp.get('/api/taxonomy/publish-suggestions', {
+      params: {
+        ...(channel ? { channel } : {}),
+        ...(keyword ? { keyword } : {}),
+      },
+    }))
   },
   postDetail(postId: number, scene = 'detail', authMode: FeedRequestAuthMode = 'session') {
     const client = authMode === 'guest' ? guestHttp : http
