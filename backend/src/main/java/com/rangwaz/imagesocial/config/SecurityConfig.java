@@ -62,6 +62,7 @@ public class SecurityConfig {
                                 "/api/feed/metrics/online",
                                 "/api/feed/posts/*/similar",
                                 "/api/posts/**",
+                                "/api/taxonomy/**",
                                 "/api/search/**")
                         .permitAll()
                         .requestMatchers(HttpMethod.GET,

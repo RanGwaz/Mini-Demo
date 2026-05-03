@@ -21,6 +21,13 @@ import { api, type FeedRequestAuthMode } from '../services/api'
 import { HttpError } from '../services/http'
 import { useAuthStore } from '../stores/auth'
 import type { PostView, UserSummary } from '../types'
+import {
+  DEFAULT_IMAGE_PLACEHOLDER,
+  getPostMediaCandidates,
+  getPostMediaUrl,
+  hasPostMedia as postHasRealMedia,
+  normalizeMediaUrl as normalizePostMediaUrl,
+} from '../utils/postMedia'
 
 const FEED_ROWS_PER_PAGE = 3
 const FEED_INITIAL_VISIBLE_ROWS = 2
@@ -272,7 +279,7 @@ function resetFeedRequestAuthMode() {
 }
 
 function normalizeMediaUrl(url?: string | null) {
-  if (!url) return '/auto_picture.png'
+  if (!url) return DEFAULT_IMAGE_PLACEHOLDER
   return url.replace('http://localhost:9000', '/minio-img')
 }
 
@@ -311,7 +318,7 @@ function formatFeedTime(createdAt?: string) {
 
 function creatorAvatar(index: number) {
   const sample = posts.value[index % Math.max(1, posts.value.length)]
-  return sample ? resolveFeedCover(sample) : '/auto_picture.png'
+  return normalizePostMediaUrl(sample?.author.avatarUrl) || DEFAULT_IMAGE_PLACEHOLDER
 }
 
 function computeColumnCount() {
@@ -499,8 +506,7 @@ function coverAspectRatio(postId: number) {
 }
 
 function estimatedCardHeight(post: PostView) {
-  const hasMedia = Boolean(post.assets?.length || post.thumbUrl || post.coverUrl)
-  if (!hasMedia) return 0.7
+  if (!postHasRealMedia(post)) return 0.72
 
   const asset = post.assets?.[0]
   const width = Number(asset?.width || 0)
@@ -536,7 +542,7 @@ function getCoverAspectRatio(post: PostView) {
 }
 
 function hasPostMedia(post: PostView) {
-  return Boolean(post.assets?.length || post.thumbUrl || post.coverUrl)
+  return postHasRealMedia(post)
 }
 
 function markFeedCoverLoaded(postId: number) {
@@ -544,23 +550,11 @@ function markFeedCoverLoaded(postId: number) {
 }
 
 function resolveFeedCover(post: PostView) {
-  const asset = post.assets?.[0]
-  const raw = coverFallbackMap.value[post.id]
-    || asset?.thumbUrl
-    || post.thumbUrl
-    || post.coverUrl
-    || asset?.fileUrl
-    || '/auto_picture.png'
-  return normalizeMediaUrl(raw)
+  return coverFallbackMap.value[post.id] || getPostMediaUrl(post)
 }
 
 function handleFeedCoverError(post: PostView) {
-  const candidates = [
-    post.assets?.[0]?.thumbUrl,
-    post.thumbUrl,
-    post.coverUrl,
-    post.assets?.[0]?.fileUrl,
-  ].filter((item): item is string => Boolean(item))
+  const candidates = getPostMediaCandidates(post)
 
   for (const candidate of candidates) {
     if (coverFallbackMap.value[post.id] !== candidate) {
@@ -1306,7 +1300,7 @@ onUnmounted(() => {
                   </div>
                   <div class="feed-home__card-body">
                     <div class="feed-home__card-author">
-                      <img :src="resolveFeedCover(post)" alt="" />
+                      <img :src="normalizeMediaUrl(post.author.avatarUrl)" alt="" />
                       <span>
                         <strong>{{ post.author.nickname }}</strong>
                         <small>{{ formatFeedTime(post.createdAt) }}</small>

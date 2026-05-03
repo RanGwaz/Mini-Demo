@@ -3,11 +3,18 @@ import { ArrowDown, ArrowUp, ChatDotRound, Pointer, Share, Star } from '@element
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import type { CommentView, PostView } from '../types'
+import {
+  DEFAULT_IMAGE_PLACEHOLDER,
+  getPostMediaAssets,
+  getPostMediaCandidates,
+  getPostMediaUrl,
+  normalizeMediaUrl,
+} from '../utils/postMedia'
 
 type DisplayAsset = {
   id?: number
-  fileUrl?: string
-  thumbUrl?: string
+  fileUrl?: string | null
+  thumbUrl?: string | null
 }
 
 const props = defineProps<{
@@ -39,19 +46,16 @@ const emit = defineEmits<{
 const router = useRouter()
 const coverReady = ref(false)
 const activeAssetIndex = ref(0)
-const coverCandidates = ref<string[]>(['/auto_picture.png'])
+const coverCandidates = ref<string[]>([])
 const coverCandidateIndex = ref(0)
-const coverSrc = ref('/auto_picture.png')
+const coverSrc = ref('')
 const commentsExpanded = ref(false)
 
-const displayAssets = computed<DisplayAsset[]>(() => {
-  if (props.post.assets?.length) return props.post.assets
-  return [{ id: props.post.id, fileUrl: props.post.coverUrl, thumbUrl: props.post.thumbUrl }]
-})
+const displayAssets = computed<DisplayAsset[]>(() => getPostMediaAssets(props.post))
+const hasMedia = computed(() => displayAssets.value.length > 0)
 
-const activeAsset = computed(() => displayAssets.value[Math.min(activeAssetIndex.value, displayAssets.value.length - 1)])
-const authorAvatar = computed(() => normalizeMediaUrl(props.post.author.avatarUrl) || '/auto_picture.png')
-const viewerAvatar = computed(() => normalizeMediaUrl(props.currentUserAvatar) || '/auto_picture.png')
+const authorAvatar = computed(() => normalizeMediaUrl(props.post.author.avatarUrl) || DEFAULT_IMAGE_PLACEHOLDER)
+const viewerAvatar = computed(() => normalizeMediaUrl(props.currentUserAvatar) || DEFAULT_IMAGE_PLACEHOLDER)
 const totalCommentCount = computed(() => Math.max(props.post.commentCount || 0, props.comments.length))
 
 const hotComments = computed(() => {
@@ -85,14 +89,9 @@ watch(activeAssetIndex, () => {
   syncCoverState()
 })
 
-function normalizeMediaUrl(url?: string | null) {
-  if (!url) return ''
-  return url.replace('http://localhost:9000', '/minio-img')
-}
-
 function handleAvatarError(event: Event) {
   const image = event.target instanceof HTMLImageElement ? event.target : null
-  if (image) image.src = '/auto_picture.png'
+  if (image) image.src = DEFAULT_IMAGE_PLACEHOLDER
 }
 
 function uniqueCandidates(candidates: Array<string | undefined | null>) {
@@ -104,19 +103,17 @@ function uniqueCandidates(candidates: Array<string | undefined | null>) {
     seen.add(normalized)
     result.push(normalized)
   }
-  return result.length > 0 ? result : ['/auto_picture.png']
+  return result
 }
 
 function syncCoverState() {
-  coverReady.value = false
+  coverReady.value = !hasMedia.value
   coverCandidates.value = uniqueCandidates([
-    activeAsset.value?.thumbUrl,
-    props.post.thumbUrl,
-    activeAsset.value?.fileUrl,
-    props.post.coverUrl,
+    getPostMediaUrl(props.post, activeAssetIndex.value),
+    ...getPostMediaCandidates(props.post),
   ])
   coverCandidateIndex.value = 0
-  coverSrc.value = coverCandidates.value[0]
+  coverSrc.value = coverCandidates.value[0] || ''
 }
 
 function onCoverLoad() {
@@ -130,7 +127,7 @@ function onCoverError() {
     return
   }
   coverReady.value = true
-  coverSrc.value = '/auto_picture.png'
+  coverSrc.value = ''
 }
 
 function selectAsset(index: number) {
@@ -187,8 +184,8 @@ function goAuthor() {
 </script>
 
 <template>
-  <article class="detail-focus-card stage-surface">
-    <div class="detail-focus-card__media">
+  <article class="detail-focus-card stage-surface" :class="{ 'is-text-only': !hasMedia }">
+    <div v-if="hasMedia" class="detail-focus-card__media">
       <button v-if="showClose" type="button" class="detail-focus-card__back" aria-label="返回"
         @click="emit('close')">←</button>
 
@@ -202,7 +199,7 @@ function goAuthor() {
         <button v-for="(asset, index) in displayAssets" :key="asset.id ?? index" type="button"
           class="detail-focus-card__thumb" :class="{ 'is-active': index === activeAssetIndex }"
           @click="selectAsset(index)">
-          <img :src="normalizeMediaUrl(asset.thumbUrl || asset.fileUrl) || '/auto_picture.png'" alt="" loading="lazy"
+          <img :src="normalizeMediaUrl(asset.thumbUrl || asset.fileUrl) || DEFAULT_IMAGE_PLACEHOLDER" alt="" loading="lazy"
             decoding="async" />
         </button>
       </div>
@@ -289,7 +286,7 @@ function goAuthor() {
           <ul v-if="visibleComments.length > 0" class="detail-focus-card__comments-list">
             <li v-for="item in visibleComments" :key="item.id" class="detail-focus-card__comment">
               <img class="detail-focus-card__comment-avatar"
-                :src="normalizeMediaUrl(item.author.avatarUrl) || '/auto_picture.png'" alt="" loading="lazy"
+                :src="normalizeMediaUrl(item.author.avatarUrl) || DEFAULT_IMAGE_PLACEHOLDER" alt="" loading="lazy"
                 decoding="async" @error="handleAvatarError" />
               <div class="detail-focus-card__comment-main">
                 <div class="detail-focus-card__comment-head">
@@ -321,6 +318,21 @@ function goAuthor() {
   flex-direction: column;
   gap: 18px;
   padding: 16px;
+}
+
+.detail-focus-card.is-text-only {
+  padding: 22px;
+}
+
+.detail-focus-card.is-text-only .detail-focus-card__title {
+  font-size: clamp(24px, 2.6vw, 34px);
+  line-height: 1.24;
+}
+
+.detail-focus-card.is-text-only .detail-focus-card__body {
+  max-width: 760px;
+  font-size: 16px;
+  line-height: 1.9;
 }
 
 .stage-surface {

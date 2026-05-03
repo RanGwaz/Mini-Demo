@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ChatDotRound, StarFilled, VideoPlay } from '@element-plus/icons-vue'
 import type { PostView } from '../../../types'
+import { getPostMediaUrl, hasPostMedia } from '../../../utils/postMedia'
 
 const props = defineProps<{
   video: PostView
@@ -10,14 +11,8 @@ const emit = defineEmits<{
   open: [id: number]
 }>()
 
-function normalizeMediaUrl(url?: string | null) {
-  if (!url) return ''
-  return String(url).replace('http://localhost:9000', '/minio-img')
-}
-
 function cardImage(post: PostView) {
-  const asset = post.assets?.[0]
-  return normalizeMediaUrl(asset?.thumbUrl || post.thumbUrl || post.coverUrl || asset?.fileUrl) || '/auto_picture.png'
+  return getPostMediaUrl(post)
 }
 
 function formatCount(value?: number) {
@@ -32,8 +27,8 @@ function formatCount(value?: number) {
 </script>
 
 <template>
-  <article class="video-card" tabindex="0" @click="emit('open', props.video.id)" @keyup.enter="emit('open', props.video.id)">
-    <div class="video-card__media">
+  <article class="video-card" :class="{ 'is-text-only': !hasPostMedia(video) }" tabindex="0" @click="emit('open', props.video.id)" @keyup.enter="emit('open', props.video.id)">
+    <div v-if="hasPostMedia(video)" class="video-card__media">
       <img class="video-card__thumb" :src="cardImage(video)" :alt="video.title || '作品封面'" loading="lazy" decoding="async" />
       <div class="video-card__views">
         <el-icon><VideoPlay /></el-icon>
@@ -81,6 +76,18 @@ function formatCount(value?: number) {
   box-shadow:
     0 0 0 3px rgba(254, 44, 85, 0.22),
     0 14px 30px rgba(15, 23, 42, 0.14);
+}
+
+.video-card.is-text-only .video-card__body {
+  padding: 14px;
+}
+
+.video-card.is-text-only .video-card__body strong {
+  -webkit-line-clamp: 3;
+}
+
+.video-card.is-text-only .video-card__body p {
+  -webkit-line-clamp: 6;
 }
 
 .video-card__media {
