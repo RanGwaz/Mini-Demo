@@ -10,6 +10,7 @@ import {
   getPostMediaUrl,
   normalizeMediaUrl,
 } from '../utils/postMedia'
+import { formatRelativeTimeZh } from '../utils/relativeTime'
 
 type DisplayAsset = {
   id?: number
@@ -142,14 +143,7 @@ function toggleCommentsExpand() {
 }
 
 function formatCommentTime(iso: string) {
-  if (!iso) return ''
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return ''
-  const diff = Date.now() - date.getTime()
-  if (diff < 60_000) return '刚刚'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
-  return new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' }).format(date)
+  return formatRelativeTimeZh(iso, { fallback: '' })
 }
 
 function formatEngageCount(n: number) {
@@ -165,16 +159,7 @@ function formatEngageCount(n: number) {
 }
 
 function formatPublishTime(iso: string) {
-  if (!iso) return ''
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return ''
-  return new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date)
+  return formatRelativeTimeZh(iso, { fallback: '' })
 }
 
 function goAuthor() {

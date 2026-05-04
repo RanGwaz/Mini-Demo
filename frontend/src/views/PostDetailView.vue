@@ -29,6 +29,7 @@ import {
   hasPostMedia,
   normalizeMediaUrl,
 } from '../utils/postMedia'
+import { formatRelativeTimeZh } from '../utils/relativeTime'
 
 const route = useRoute()
 const router = useRouter()
@@ -48,6 +49,7 @@ const commentsLoading = ref(false)
 const commentsPage = ref(1)
 const commentsHasMore = ref(true)
 const commentDraft = ref('')
+const commentsListRef = ref<HTMLElement | null>(null)
 const lightboxOpen = ref(false)
 
 const relatedPosts = ref<PostView[]>([])
@@ -57,6 +59,8 @@ const relatedPage = ref(1)
 const relatedHasMore = ref(true)
 const relatedSentinelRef = ref<HTMLElement | null>(null)
 const relatedColumnCount = ref(4)
+const mediaRef = ref<HTMLElement | null>(null)
+const metaMaxHeight = ref<number | null>(null)
 
 const COMMENT_PAGE_SIZE = 12
 const RELATED_PAGE_SIZE = 18
@@ -72,6 +76,11 @@ const authorAvatar = computed(() => normalizeMediaUrl(post.value?.author.avatarU
 
 const postAssets = computed(() => getPostMediaAssets(post.value))
 const hasDetailMedia = computed(() => postAssets.value.length > 0)
+const isMetaScrollMode = computed(() => hasDetailMedia.value && typeof metaMaxHeight.value === 'number' && metaMaxHeight.value > 0)
+const metaScrollStyle = computed(() => {
+  if (!isMetaScrollMode.value || !metaMaxHeight.value) return undefined
+  return { maxHeight: `${metaMaxHeight.value}px` }
+})
 
 const activeCoverUrl = computed(() => {
   const current = post.value
@@ -95,17 +104,7 @@ function formatCount(value?: number | null) {
 }
 
 function formatRelativeTime(createdAt?: string) {
-  if (!createdAt) return '刚刚'
-  const timestamp = new Date(createdAt).getTime()
-  if (Number.isNaN(timestamp)) return '刚刚'
-  const diff = Math.max(0, Date.now() - timestamp)
-  const minute = 60 * 1000
-  const hour = 60 * minute
-  const day = 24 * hour
-  if (diff < minute) return '刚刚'
-  if (diff < hour) return `${Math.floor(diff / minute)}分钟前`
-  if (diff < day) return `${Math.floor(diff / hour)}小时前`
-  return `${Math.floor(diff / day)}天前`
+  return formatRelativeTimeZh(createdAt)
 }
 
 function extractHashtags(postItem: PostView) {
@@ -150,16 +149,19 @@ function showPrevAsset() {
   const total = postAssets.value.length
   if (total <= 1) return
   activeAssetIndex.value = (activeAssetIndex.value - 1 + total) % total
+  void nextTick(syncMetaHeight)
 }
 
 function showNextAsset() {
   const total = postAssets.value.length
   if (total <= 1) return
   activeAssetIndex.value = (activeAssetIndex.value + 1) % total
+  void nextTick(syncMetaHeight)
 }
 
 function selectAsset(index: number) {
   activeAssetIndex.value = index
+  void nextTick(syncMetaHeight)
 }
 
 function openAuthor() {
@@ -178,6 +180,24 @@ function computeRelatedColumnCount() {
 
 function updateRelatedColumnCount() {
   relatedColumnCount.value = computeRelatedColumnCount()
+}
+
+function syncMetaHeight() {
+  if (typeof window === 'undefined' || !hasDetailMedia.value || window.innerWidth <= 1400) {
+    metaMaxHeight.value = null
+    return
+  }
+
+  const mediaElement = mediaRef.value
+  if (!mediaElement) return
+
+  const height = Math.floor(mediaElement.getBoundingClientRect().height)
+  if (height > 0) metaMaxHeight.value = height
+}
+
+function handleWindowResize() {
+  updateRelatedColumnCount()
+  syncMetaHeight()
 }
 
 function relatedFallbackRatio(postItemId: number) {
@@ -355,6 +375,7 @@ async function toggleFollow() {
 
 async function submitComment() {
   if (!post.value) return
+  const currentPostId = post.value.id
   const content = commentDraft.value.trim()
   if (!content) return
   if (!authStore.accessToken) {
@@ -362,13 +383,27 @@ async function submitComment() {
     return
   }
   try {
-    const created = await api.comment(post.value.id, content)
+    const created = await api.comment(currentPostId, content)
     comments.value = [created, ...comments.value.filter((item) => item.id !== created.id)]
     commentDraft.value = ''
-    post.value.commentCount += 1
+    if (post.value) post.value.commentCount += 1
+    await nextTick()
+    commentsListRef.value?.scrollTo({ top: 0, behavior: 'smooth' })
+    void refreshCommentsAfterSubmit(currentPostId)
     ElMessage.success('评论成功')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '评论失败')
+  }
+}
+
+async function refreshCommentsAfterSubmit(postId: number) {
+  try {
+    const response = await api.commentsPage(postId, 1, COMMENT_PAGE_SIZE)
+    comments.value = response.records || []
+    commentsPage.value = 2
+    commentsHasMore.value = comments.value.length < response.total
+  } catch {
+    // optimistic list already updated in submitComment; ignore refresh failures
   }
 }
 
@@ -425,6 +460,7 @@ async function loadDetail(targetId: number) {
       loadMoreRelated(),
     ])
     await nextTick()
+    syncMetaHeight()
     setupRelatedObserver()
   } catch (error) {
     if (requestId !== requestSerial) return
@@ -445,14 +481,19 @@ watch(() => authStore.accessToken, async () => {
   await Promise.all([ensureInteractionStatus(post.value.id), ensureFollowStatus()])
 })
 
+watch(() => hasDetailMedia.value, async () => {
+  await nextTick()
+  syncMetaHeight()
+})
+
 onMounted(() => {
-  updateRelatedColumnCount()
-  window.addEventListener('resize', updateRelatedColumnCount)
+  handleWindowResize()
+  window.addEventListener('resize', handleWindowResize)
   setupRelatedObserver()
 })
 
 onUnmounted(() => {
-  window.removeEventListener('resize', updateRelatedColumnCount)
+  window.removeEventListener('resize', handleWindowResize)
   relatedObserver?.disconnect()
   relatedObserver = null
 })
@@ -480,9 +521,9 @@ onUnmounted(() => {
         </div>
 
         <div v-else-if="post" class="detail-page__panel" :class="{ 'is-text-only': !hasDetailMedia }">
-          <div v-if="hasDetailMedia" class="detail-page__media">
+          <div v-if="hasDetailMedia" ref="mediaRef" class="detail-page__media">
             <div class="detail-page__media-wrap">
-              <img :src="activeCoverUrl" :alt="post.title || '作品图片'" @click="openLightbox" @error="onPostCoverError(post)" />
+              <img :src="activeCoverUrl" :alt="post.title || '作品图片'" @click="openLightbox" @load="syncMetaHeight" @error="onPostCoverError(post)" />
               <button type="button" class="detail-page__zoom-btn" @click="openLightbox">查看大图</button>
               <button v-if="postAssets.length > 1" type="button" class="detail-page__asset-arrow is-left" @click="showPrevAsset">
                 <el-icon><ArrowLeft /></el-icon>
@@ -502,7 +543,7 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div class="detail-page__meta">
+          <div class="detail-page__meta" :class="{ 'is-scrollable': isMetaScrollMode }" :style="metaScrollStyle">
             <header class="detail-page__author">
               <button type="button" class="detail-page__author-main" @click="openAuthor">
                 <img :src="authorAvatar" :alt="post.author.nickname" />
@@ -543,7 +584,7 @@ onUnmounted(() => {
                 </button>
               </div>
 
-              <div class="detail-page__comments-list">
+              <div ref="commentsListRef" class="detail-page__comments-list">
                 <article v-for="item in comments.slice(0, 6)" :key="item.id">
                   <img :src="normalizeMediaUrl(item.author.avatarUrl) || '/auto_picture.png'" :alt="item.author.nickname" />
                   <div>
@@ -688,6 +729,7 @@ onUnmounted(() => {
 .detail-page__panel {
   display: grid;
   grid-template-columns: minmax(0, 52%) minmax(0, 48%);
+  align-items: start;
   gap: 18px;
 }
 
@@ -845,6 +887,21 @@ onUnmounted(() => {
   min-height: 0;
 }
 
+.detail-page__meta.is-scrollable {
+  overflow-y: auto;
+  padding-right: 6px;
+  scrollbar-gutter: stable;
+}
+
+.detail-page__meta.is-scrollable::-webkit-scrollbar {
+  width: 8px;
+}
+
+.detail-page__meta.is-scrollable::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(132, 141, 156, 0.45);
+}
+
 .detail-page__author {
   display: flex;
   align-items: center;
@@ -981,9 +1038,6 @@ onUnmounted(() => {
 
 .detail-page__comments {
   min-height: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 9px;
 }
 
 .detail-page__comments-head {
@@ -1008,8 +1062,11 @@ onUnmounted(() => {
 }
 
 .detail-page__comments-list {
+  min-height: 72px;
   max-height: 220px;
   overflow-y: auto;
+  margin-top: 8px;
+  margin-bottom: 9px;
   padding-right: 3px;
 }
 

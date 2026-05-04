@@ -28,6 +28,7 @@ import {
   hasPostMedia as postHasRealMedia,
   normalizeMediaUrl as normalizePostMediaUrl,
 } from '../utils/postMedia'
+import { formatRelativeTimeZh } from '../utils/relativeTime'
 
 const FEED_ROWS_PER_PAGE = 3
 const FEED_INITIAL_VISIBLE_ROWS = 2
@@ -303,17 +304,7 @@ function isPostLiking(postId: number) {
 }
 
 function formatFeedTime(createdAt?: string) {
-  if (!createdAt) return '刚刚'
-  const timestamp = new Date(createdAt).getTime()
-  if (Number.isNaN(timestamp)) return '刚刚'
-  const diff = Math.max(0, Date.now() - timestamp)
-  const minute = 60 * 1000
-  const hour = 60 * minute
-  const day = 24 * hour
-  if (diff < minute) return '刚刚'
-  if (diff < hour) return `${Math.floor(diff / minute)}分钟前`
-  if (diff < day) return `${Math.floor(diff / hour)}小时前`
-  return `${Math.floor(diff / day)}天前`
+  return formatRelativeTimeZh(createdAt)
 }
 
 function creatorAvatar(index: number) {
