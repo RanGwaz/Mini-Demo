@@ -38,16 +38,21 @@ type NavItem = {
   query: { feed?: string; channel?: string }
 }
 
-const navItems: NavItem[] = [
+const primaryNavItems: NavItem[] = [
   { key: 'recommend', label: '为你推荐', icon: HomeFilled, query: { feed: 'recommend' } },
+  ...contentChannels
+    .filter((channel) => channel.key !== 'general')
+    .map((channel) => ({
+      key: channel.key,
+      label: channel.label,
+      icon: channelIcons[channel.key],
+      query: { channel: channel.key },
+    })),
+]
+
+const bottomNavItems: NavItem[] = [
   { key: 'following', label: '关注', icon: UserFilled, query: { feed: 'following' } },
   { key: 'friends', label: '朋友动态', icon: Star, query: { feed: 'friends' } },
-  ...contentChannels.map((channel) => ({
-    key: channel.key,
-    label: channel.label,
-    icon: channelIcons[channel.key],
-    query: { channel: channel.key },
-  })),
 ]
 
 const audienceRows = contentChannels.filter((channel) => channel.key !== 'general').slice(2, 5)
@@ -94,9 +99,23 @@ function jumpToChannel(channel: string) {
 
 <template>
   <aside :class="['common-left-rail', { 'is-fixed': props.fixed }]" aria-label="页面导航">
-    <nav class="common-left-rail__side-nav">
+    <nav class="common-left-rail__side-nav common-left-rail__side-nav--main">
       <button
-        v-for="item in navItems"
+        v-for="item in primaryNavItems"
+        :key="item.key"
+        type="button"
+        class="common-left-rail__side-item"
+        :class="{ 'is-active': isActive(item) }"
+        @click="handleNav(item)"
+      >
+        <el-icon><component :is="item.icon" /></el-icon>
+        <span>{{ item.label }}</span>
+      </button>
+    </nav>
+
+    <nav class="common-left-rail__side-nav common-left-rail__side-nav--bottom">
+      <button
+        v-for="item in bottomNavItems"
         :key="item.key"
         type="button"
         class="common-left-rail__side-item"
@@ -136,6 +155,8 @@ function jumpToChannel(channel: string) {
 
 <style scoped>
 .common-left-rail {
+  display: flex;
+  flex-direction: column;
   width: 214px;
   min-height: calc(100vh - 106px);
   max-height: calc(100vh - 102px);
@@ -157,6 +178,9 @@ function jumpToChannel(channel: string) {
 .common-left-rail__side-nav {
   display: grid;
   gap: 4px;
+}
+
+.common-left-rail__side-nav--main {
   padding-bottom: 14px;
   border-bottom: 1px solid #edf0f4;
 }
@@ -195,7 +219,9 @@ function jumpToChannel(channel: string) {
 }
 
 .common-left-rail__community {
-  padding-top: 18px;
+  margin-top: 10px;
+  padding-top: 14px;
+  border-top: 1px solid #edf0f4;
 }
 
 .common-left-rail__title {
@@ -262,6 +288,12 @@ function jumpToChannel(channel: string) {
   white-space: nowrap;
 }
 
+.common-left-rail__side-nav--bottom {
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid #edf0f4;
+}
+
 @media (max-width: 1280px) {
   .common-left-rail {
     width: 190px;
@@ -282,9 +314,14 @@ function jumpToChannel(channel: string) {
     grid-auto-flow: column;
     grid-auto-columns: max-content;
     overflow-x: auto;
-    padding-bottom: 0;
-    border-bottom: none;
+    padding: 0;
+    border: none;
     scrollbar-width: none;
+  }
+
+  .common-left-rail__side-nav--bottom {
+    margin-top: 8px;
+    border-top: none;
   }
 
   .common-left-rail__side-nav::-webkit-scrollbar {
