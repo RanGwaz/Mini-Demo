@@ -17,9 +17,9 @@ import AuthWallDialog from './AuthWallDialog.vue'
 import { useAuthStore } from '../stores/auth'
 
 type NavItem = {
-  key: 'discover' | 'creator'
+  key: 'creator'
   label: string
-  path: '/home' | '/publish'
+  path: '/publish'
 }
 
 const router = useRouter()
@@ -30,8 +30,7 @@ const globalKeyword = ref('')
 authStore.hydrate()
 
 const navItems: NavItem[] = [
-  { key: 'discover', label: '发现', path: '/home' },
-  { key: 'creator', label: '创作中心', path: '/publish' },
+  { key: 'creator', label: '创作者中心', path: '/publish' },
 ]
 
 function go(path: string) {
@@ -47,9 +46,7 @@ function isFeedSurfacePath() {
 }
 
 function isNavActive(item: NavItem) {
-  if (item.key === 'creator') return route.path.startsWith('/publish')
-  if (item.key === 'discover') return isFeedSurfacePath()
-  return false
+  return item.key === 'creator' && route.path.startsWith('/publish')
 }
 
 function handleNav(item: NavItem) {

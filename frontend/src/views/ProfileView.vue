@@ -327,9 +327,12 @@ onMounted(() => {
 
               <div class="profile-home__card-body">
                 <h3>{{ item.title || '未命名动态' }}</h3>
-                <p v-if="item.content">{{ item.content }}</p>
-                <small v-if="item.tags?.length">
-                  <template v-for="tag in item.tags.slice(0, 3)" :key="tag">#{{ tag }} </template>
+                <p :class="{ 'is-empty': !item.content }">{{ item.content || ' ' }}</p>
+                <small :class="{ 'is-empty': !item.tags?.length }">
+                  <template v-if="item.tags?.length">
+                    <template v-for="tag in item.tags.slice(0, 3)" :key="tag">#{{ tag }} </template>
+                  </template>
+                  <template v-else>&nbsp;</template>
                 </small>
                 <div class="profile-home__card-actions">
                   <span>♡ {{ formatCount(item.likeCount) }}</span>
@@ -724,6 +727,9 @@ onMounted(() => {
 }
 
 .profile-home__card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   overflow: hidden;
   border: 1px solid #e8ebf0;
   border-radius: 8px;
@@ -743,13 +749,16 @@ onMounted(() => {
 
 .profile-home__card.is-text-only .profile-home__card-body {
   padding: 14px;
+  min-height: 276px;
 }
 
 .profile-home__card.is-text-only .profile-home__card-body h3 {
+  min-height: calc(1.45em * 3);
   -webkit-line-clamp: 3;
 }
 
 .profile-home__card.is-text-only .profile-home__card-body p {
+  min-height: calc(1.5em * 6);
   -webkit-line-clamp: 6;
 }
 
@@ -778,11 +787,16 @@ onMounted(() => {
 }
 
 .profile-home__card-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 140px;
   padding: 8px 10px;
 }
 
 .profile-home__card-body h3 {
   display: -webkit-box;
+  min-height: calc(1.45em * 2);
   margin: 0;
   overflow: hidden;
   color: #2e3441;
@@ -794,6 +808,7 @@ onMounted(() => {
 
 .profile-home__card-body p {
   display: -webkit-box;
+  min-height: calc(1.5em * 2);
   margin: 5px 0 0;
   overflow: hidden;
   color: #646d7d;
@@ -805,16 +820,23 @@ onMounted(() => {
 
 .profile-home__card-body small {
   display: block;
+  min-height: 1.3em;
   margin-top: 6px;
   color: #5a7cd4;
   font-size: 13px;
+}
+
+.profile-home__card-body p.is-empty,
+.profile-home__card-body small.is-empty {
+  visibility: hidden;
 }
 
 .profile-home__card-actions {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 8px;
+  margin-top: auto;
+  padding-top: 8px;
   color: #6f7582;
   font-size: 13px;
 }
