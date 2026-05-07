@@ -1,6 +1,9 @@
 package com.rangwaz.imagesocial.post;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rangwaz.imagesocial.auth.dto.UserSummary;
 import com.rangwaz.imagesocial.common.api.PageResponse;
 import com.rangwaz.imagesocial.common.exception.BusinessException;
@@ -23,11 +26,13 @@ import com.rangwaz.imagesocial.event.EventService;
 import com.rangwaz.imagesocial.post.dto.CreatePostRequest;
 import com.rangwaz.imagesocial.post.dto.PostAssetRequest;
 import com.rangwaz.imagesocial.post.dto.PostAssetView;
+import com.rangwaz.imagesocial.post.dto.PostImageView;
 import com.rangwaz.imagesocial.post.dto.PostView;
 import com.rangwaz.imagesocial.search.SearchIndexGateway;
 import com.rangwaz.imagesocial.taxonomy.ContentChannel;
 import com.rangwaz.imagesocial.user.UserService;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -42,6 +47,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class PostService {
+    private static final TypeReference<Map<String, Object>> EXTRA_TYPE = new TypeReference<>() {};
     private static final long VIEW_DEDUP_WINDOW_MILLIS = 30_000L;
     private static final ConcurrentHashMap<String, Long> VIEW_TRACKER = new ConcurrentHashMap<>();
 
@@ -55,6 +61,7 @@ public class PostService {
     private final UserService userService;
     private final EventService eventService;
     private final SearchIndexGateway searchIndexGateway;
+    private final ObjectMapper objectMapper;
 
     public PostService(PostMapper postMapper,
                        PostAssetMapper postAssetMapper,
@@ -65,7 +72,8 @@ public class PostService {
                        ContentReportMapper contentReportMapper,
                        UserService userService,
                        EventService eventService,
-                       SearchIndexGateway searchIndexGateway) {
+                       SearchIndexGateway searchIndexGateway,
+                       ObjectMapper objectMapper) {
         this.postMapper = postMapper;
         this.postAssetMapper = postAssetMapper;
         this.postLikeMapper = postLikeMapper;
@@ -76,25 +84,31 @@ public class PostService {
         this.userService = userService;
         this.eventService = eventService;
         this.searchIndexGateway = searchIndexGateway;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional
     public PostView createPost(Long authorId, CreatePostRequest request) {
         User author = userService.requireById(authorId);
-        ContentChannel channel = resolveChannel(request.channel());
+        ContentChannel channel = resolveChannel(request);
+        String postType = resolvePostType(channel, request.postType());
         List<String> normalizedTags = normalizeTags(request.tags());
-        List<PostAssetRequest> assets = request.assets() == null
-                ? List.of()
-                : request.assets().stream().filter(Objects::nonNull).toList();
+        List<PostAssetRequest> assets = normalizeAssets(request);
         PostAssetRequest firstAsset = assets.isEmpty() ? null : assets.get(0);
 
         Post post = new Post();
         post.setAuthorId(authorId);
+        post.setChannelCode(channel.key());
+        post.setPostType(postType);
         post.setTitle(request.title());
         post.setContent(request.content());
+        post.setExtra(toExtraJson(request.extra()));
         post.setTags(joinTags(normalizedTags));
         post.setTopicPath(channel.topicPath());
+        post.setSemanticTags(joinRawTerms(buildSemanticTerms(channel, normalizedTags)));
+        post.setStyleTags(assets.isEmpty() ? "text" : "image");
         post.setTopicClusterKey(channel.key());
+        post.setSubtopicClusterKey(normalizedTags.isEmpty() ? channel.key() : normalizedTags.get(0));
         post.setTaxonomyVersion(ContentChannel.TAXONOMY_VERSION);
         post.setCoverUrl(firstAsset == null ? "" : firstAsset.fileUrl());
         post.setThumbUrl(firstAsset == null ? null : firstAsset.thumbUrl());
@@ -103,8 +117,13 @@ public class PostService {
         post.setLikeCount(0);
         post.setFavoriteCount(0);
         post.setCommentCount(0);
+        post.setShareCount(0);
         post.setViewCount(0L);
         post.setHotScore(BigDecimal.ZERO);
+        post.setQualityScore(initialQualityScore(request, normalizedTags, assets));
+        post.setAestheticScore(assets.isEmpty() ? BigDecimal.ZERO : BigDecimal.valueOf(0.6800d).setScale(4, RoundingMode.HALF_UP));
+        post.setSafetyScore(BigDecimal.ONE.setScale(4, RoundingMode.HALF_UP));
+        post.setEmbeddingVersion(assets.isEmpty() ? "runtime-text-v1" : "runtime-media-pending-v1");
         postMapper.insert(post);
 
         for (PostAssetRequest assetRequest : assets) {
@@ -126,7 +145,7 @@ public class PostService {
                 authorId,
                 "POST",
                 post.getId(),
-                Map.of("title", post.getTitle(), "channel", channel.key(), "tags", normalizedTags)
+                Map.of("title", post.getTitle(), "channelCode", channel.key(), "postType", postType, "tags", normalizedTags)
         );
         searchIndexGateway.syncPost(view);
         return view;
@@ -291,34 +310,115 @@ public class PostService {
         if (author == null) {
             throw new BusinessException("帖子作者不存在");
         }
+        ContentChannel channel = ContentChannel.fromPostTaxonomy(firstNonBlank(post.getChannelCode(), post.getTopicClusterKey()), post.getTopicPath());
+        String postType = firstNonBlank(post.getPostType(), channel.postType());
         return new PostView(
                 post.getId(),
                 author,
                 post.getTitle(),
                 post.getContent(),
                 parseTags(post),
-                ContentChannel.fromPostTaxonomy(post.getTopicClusterKey(), post.getTopicPath()).key(),
+                channel.key(),
+                channel.key(),
+                postType,
                 post.getTopicPath(),
                 parseCsv(post.getSemanticTags()),
                 parseCsv(post.getStyleTags()),
                 assets,
+                toImageViews(assets),
                 post.getCoverUrl(),
                 post.getThumbUrl(),
+                parseExtra(post.getExtra()),
                 post.getLikeCount(),
                 post.getFavoriteCount(),
+                post.getFavoriteCount(),
                 post.getCommentCount(),
+                post.getShareCount() == null ? 0 : post.getShareCount(),
                 post.getViewCount(),
                 reason,
                 post.getCreatedAt()
         );
     }
 
-    private ContentChannel resolveChannel(String channelKey) {
+    private ContentChannel resolveChannel(CreatePostRequest request) {
+        String channelKey = firstNonBlank(request.channelCode(), request.channel());
         if (channelKey == null || channelKey.isBlank()) {
             return ContentChannel.defaultChannel();
         }
         return ContentChannel.fromKey(channelKey)
                 .orElseThrow(() -> new BusinessException("频道不存在"));
+    }
+
+    private String resolvePostType(ContentChannel channel, String rawPostType) {
+        String value = firstNonBlank(rawPostType, channel.postType());
+        return value == null || value.isBlank() ? channel.postType() : value;
+    }
+
+    private List<PostAssetRequest> normalizeAssets(CreatePostRequest request) {
+        if (request.assets() != null && !request.assets().isEmpty()) {
+            return request.assets().stream().filter(Objects::nonNull).toList();
+        }
+        if (request.imageUrls() == null || request.imageUrls().isEmpty()) {
+            return List.of();
+        }
+        List<String> imageUrls = request.imageUrls().stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .limit(12)
+                .toList();
+        return java.util.stream.IntStream.range(0, imageUrls.size())
+                .mapToObj(index -> new PostAssetRequest(imageUrls.get(index), imageUrls.get(index), "image", null, null, null, index))
+                .toList();
+    }
+
+    private List<PostImageView> toImageViews(List<PostAssetView> assets) {
+        if (assets == null || assets.isEmpty()) {
+            return List.of();
+        }
+        return assets.stream()
+                .map(asset -> new PostImageView(
+                        firstNonBlank(asset.fileUrl(), asset.thumbUrl()),
+                        asset.width(),
+                        asset.height()
+                ))
+                .toList();
+    }
+
+    private String toExtraJson(Map<String, Object> extra) {
+        if (extra == null || extra.isEmpty()) {
+            return "{}";
+        }
+        try {
+            return objectMapper.writeValueAsString(extra);
+        } catch (JsonProcessingException exception) {
+            throw new BusinessException("扩展字段格式错误");
+        }
+    }
+
+    private Map<String, Object> parseExtra(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return Map.of();
+        }
+        try {
+            Map<String, Object> value = objectMapper.readValue(raw, EXTRA_TYPE);
+            return value == null ? Map.of() : value;
+        } catch (Exception exception) {
+            return Map.of();
+        }
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return null;
     }
 
     private List<String> parseCsv(String raw) {
@@ -351,5 +451,41 @@ public class PostService {
             return "";
         }
         return String.join(",", normalizedTags);
+    }
+
+    private List<String> buildSemanticTerms(ContentChannel channel, List<String> tags) {
+        return java.util.stream.Stream.concat(java.util.stream.Stream.of(channel.key(), channel.topicPath()), tags.stream())
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .limit(12)
+                .toList();
+    }
+
+    private String joinRawTerms(List<String> terms) {
+        if (terms == null || terms.isEmpty()) {
+            return "";
+        }
+        return terms.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .limit(12)
+                .collect(Collectors.joining(","));
+    }
+
+    private BigDecimal initialQualityScore(CreatePostRequest request,
+                                           List<String> normalizedTags,
+                                           List<PostAssetRequest> assets) {
+        int titleLength = request.title() == null ? 0 : request.title().trim().length();
+        int contentLength = request.content() == null ? 0 : request.content().trim().length();
+        double contentScore = Math.min(1.0d, (titleLength / 64.0d) * 0.30d + (contentLength / 420.0d) * 0.45d);
+        double tagScore = Math.min(0.16d, normalizedTags.size() * 0.025d);
+        double mediaScore = assets.isEmpty() ? 0.0d : Math.min(0.18d, assets.size() * 0.06d);
+        double baseline = assets.isEmpty() ? 0.46d : 0.52d;
+        double score = Math.min(1.0d, baseline + contentScore + tagScore + mediaScore);
+        return BigDecimal.valueOf(score).setScale(4, RoundingMode.HALF_UP);
     }
 }

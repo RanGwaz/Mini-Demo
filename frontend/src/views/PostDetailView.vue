@@ -16,6 +16,7 @@ import { ElMessage } from 'element-plus'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import CommonLeftSidebar from '../components/CommonLeftSidebar.vue'
+import PostDetailRenderer from '../components/detail/PostDetailRenderer.vue'
 import { api, type FeedRequestAuthMode } from '../services/api'
 import { HttpError } from '../services/http'
 import { useAuthStore } from '../stores/auth'
@@ -105,10 +106,6 @@ function formatCount(value?: number | null) {
 
 function formatRelativeTime(createdAt?: string) {
   return formatRelativeTimeZh(createdAt)
-}
-
-function extractHashtags(postItem: PostView) {
-  return (postItem.tags || []).slice(0, 5).map((tag) => `#${tag}`)
 }
 
 function resolveCover(postItem: PostView) {
@@ -560,18 +557,12 @@ onUnmounted(() => {
               </div>
             </header>
 
-            <section class="detail-page__content">
-              <h1>{{ post.title || '未命名作品' }}</h1>
-              <p v-if="post.content">{{ post.content }}</p>
-              <div class="detail-page__tags">
-                <span v-for="tag in extractHashtags(post)" :key="tag">{{ tag }}</span>
-              </div>
-            </section>
+            <PostDetailRenderer :post="post" />
 
             <div class="detail-page__actions">
               <button type="button" :class="{ 'is-active': liked }" @click="toggleLike"><span>♡</span>{{ formatCount(post.likeCount) }}</button>
               <button type="button"><el-icon><ChatLineRound /></el-icon>{{ formatCount(post.commentCount) }}</button>
-              <button type="button" @click="trackShare"><el-icon><Share /></el-icon>{{ formatCount(post.favoriteCount) }}</button>
+              <button type="button" @click="trackShare"><el-icon><Share /></el-icon>{{ formatCount(post.shareCount) }}</button>
               <button type="button" :class="{ 'is-active': favorited }" @click="toggleFavorite"><el-icon><Star /></el-icon>收藏</button>
             </div>
 

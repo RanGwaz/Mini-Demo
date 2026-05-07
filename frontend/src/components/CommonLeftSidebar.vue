@@ -23,12 +23,11 @@ const router = useRouter()
 const route = useRoute()
 
 const channelIcons: Record<ContentChannelKey, typeof HomeFilled> = {
-  general: HomeFilled,
-  campus_life: Notebook,
-  photography: Camera,
+  campus: Notebook,
   anime_outfit: Brush,
-  pets: Opportunity,
-  overseas: School,
+  pet: Opportunity,
+  photography: Camera,
+  tech_moment: School,
 }
 
 type NavItem = {
@@ -41,7 +40,6 @@ type NavItem = {
 const primaryNavItems: NavItem[] = [
   { key: 'recommend', label: '为你推荐', icon: HomeFilled, query: { feed: 'recommend' } },
   ...contentChannels
-    .filter((channel) => channel.key !== 'general')
     .map((channel) => ({
       key: channel.key,
       label: channel.label,
@@ -55,7 +53,7 @@ const bottomNavItems: NavItem[] = [
   { key: 'friends', label: '朋友动态', icon: Star, query: { feed: 'friends' } },
 ]
 
-const audienceRows = contentChannels.filter((channel) => channel.key !== 'general').slice(2, 5)
+const audienceRows = contentChannels.slice(2, 5)
 
 function routeQueryValue(value: unknown) {
   if (Array.isArray(value)) return value[0] || ''

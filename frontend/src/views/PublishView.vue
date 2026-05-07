@@ -14,6 +14,8 @@ import {
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import PublishFormRenderer from '../components/publish/PublishFormRenderer.vue'
+import { channelConfig } from '../config/channelConfig'
 import { defaultPublishChannelKey, publishChannels, type PublishChannelKey } from '../domain/contentTaxonomy'
 import { api, type CreatePostAssetPayload, type PublishTagSuggestion } from '../services/api'
 import { useAuthStore } from '../stores/auth'
@@ -54,6 +56,7 @@ const tagInput = ref('')
 const quickTags = ref<string[]>([])
 const hashtagRecommendations = ref<PublishTagSuggestion[]>([])
 const activeChannel = ref<PublishChannelKey>(defaultPublishChannelKey)
+const channelExtra = ref<Record<string, unknown>>({})
 const visibility = ref('public')
 let tagSearchTimer: number | undefined
 
@@ -133,6 +136,7 @@ const sampleCoverCards: CoverPreviewCard[] = [
 const titleCount = computed(() => form.title.length)
 const contentCount = computed(() => form.content.length)
 const currentChannelLabel = computed(() => publishChannels.find((item) => item.key === activeChannel.value)?.label || publishChannels[0]?.label || '')
+const currentPostType = computed(() => channelConfig[activeChannel.value].postType)
 const currentUserName = computed(() => authStore.currentUser?.nickname || 'Vibelo 用户')
 const currentUserAvatar = computed(() => authStore.currentUser?.avatarUrl || 'https://api.dicebear.com/9.x/adventurer/svg?seed=creator')
 const hasImages = computed(() => uploadedAssets.value.length > 0)
@@ -193,6 +197,7 @@ onMounted(() => {
 })
 
 watch(activeChannel, () => {
+  channelExtra.value = {}
   void loadPublishSuggestions()
 })
 
@@ -319,6 +324,57 @@ function toAssetsPayload(): CreatePostAssetPayload[] {
   }))
 }
 
+function compactExtraValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    const values = value
+      .map((item) => compactExtraValue(item))
+      .filter((item) => item !== undefined)
+    return values.length > 0 ? values : undefined
+  }
+  if (typeof value === 'string') {
+    const text = value.trim()
+    return text ? text : undefined
+  }
+  if (value === null || value === undefined) return undefined
+  if (typeof value === 'object') {
+    const nested = Object.entries(value as Record<string, unknown>).reduce<Record<string, unknown>>((acc, [key, item]) => {
+      const next = compactExtraValue(item)
+      if (next !== undefined) acc[key] = next
+      return acc
+    }, {})
+    return Object.keys(nested).length > 0 ? nested : undefined
+  }
+  return value
+}
+
+function buildExtraPayload() {
+  const extra = Object.entries(channelExtra.value).reduce<Record<string, unknown>>((acc, [key, value]) => {
+    const next = compactExtraValue(value)
+    if (next !== undefined) acc[key] = next
+    return acc
+  }, {})
+
+  if (activeChannel.value === 'photography') {
+    const exif: Record<string, unknown> = {}
+    for (const key of ['aperture', 'iso', 'shutter']) {
+      if (extra[key] === undefined) continue
+      exif[key] = extra[key]
+      delete extra[key]
+    }
+    if (Object.keys(exif).length > 0) {
+      const existingExif = typeof extra.exif === 'object' && extra.exif !== null && !Array.isArray(extra.exif)
+        ? extra.exif as Record<string, unknown>
+        : {}
+      extra.exif = {
+        ...existingExif,
+        ...exif,
+      }
+    }
+  }
+
+  return extra
+}
+
 async function submit() {
   if (!form.title.trim()) {
     ElMessage.warning('请先填写标题')
@@ -337,18 +393,28 @@ async function submit() {
   try {
     const finalTags = uniqueTags(selectedTags.value).slice(0, MAX_TAGS_PER_POST)
     const assets = selectedKind.value === 'image' ? toAssetsPayload() : []
+    const imageUrls = assets.map((asset) => asset.fileUrl).filter(Boolean)
+    const extra = buildExtraPayload()
     const payload: {
       title: string
       content: string
       channel: string
+      channelCode: string
+      postType: string
+      imageUrls?: string[]
+      extra?: Record<string, unknown>
       tags?: string[]
       assets?: CreatePostAssetPayload[]
     } = {
       title: form.title.trim(),
       content: form.content.trim(),
       channel: activeChannel.value,
+      channelCode: activeChannel.value,
+      postType: currentPostType.value,
       ...(finalTags.length > 0 ? { tags: finalTags } : {}),
       ...(assets.length > 0 ? { assets } : {}),
+      ...(imageUrls.length > 0 ? { imageUrls } : {}),
+      ...(Object.keys(extra).length > 0 ? { extra } : {}),
     }
 
     await api.createPost(payload)
@@ -470,6 +536,11 @@ async function submit() {
                 {{ channel.label }}
               </button>
             </div>
+          </div>
+
+          <div class="publish-studio__row publish-studio__row--top">
+            <strong>扩展信息</strong>
+            <PublishFormRenderer v-model="channelExtra" :channel-code="activeChannel" />
           </div>
 
           <div class="publish-studio__row publish-studio__row--top">

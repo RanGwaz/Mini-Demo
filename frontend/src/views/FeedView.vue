@@ -3,14 +3,14 @@ defineOptions({ name: 'FeedView' })
 
 import {
   ArrowRight,
-  ChatLineRound,
+  RefreshRight,
   Search,
-  Share,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import CommonLeftSidebar from '../components/CommonLeftSidebar.vue'
+import FeedCardRenderer from '../components/feed/FeedCardRenderer.vue'
 import {
   feedChannelTabs as channelTabs,
   feedModeTabs,
@@ -23,12 +23,9 @@ import { useAuthStore } from '../stores/auth'
 import type { PostView, UserSummary } from '../types'
 import {
   DEFAULT_IMAGE_PLACEHOLDER,
-  getPostMediaCandidates,
-  getPostMediaUrl,
   hasPostMedia as postHasRealMedia,
   normalizeMediaUrl as normalizePostMediaUrl,
 } from '../utils/postMedia'
-import { formatRelativeTimeZh } from '../utils/relativeTime'
 
 const FEED_ROWS_PER_PAGE = 3
 const FEED_INITIAL_VISIBLE_ROWS = 2
@@ -83,9 +80,7 @@ const searchedUsers = ref<UserSummary[]>([])
 const searching = ref(false)
 const columnCount = ref(4)
 const followingAuthorIds = ref<Set<number>>(new Set())
-const loadedCoversSet = ref<Set<number>>(new Set())
 const showBackTop = ref(false)
-const coverFallbackMap = ref<Record<number, string>>({})
 const likedPostIds = ref<Set<number>>(new Set())
 const likeCountOverrides = ref<Record<number, number>>({})
 const likingPostIds = ref<Set<number>>(new Set())
@@ -106,7 +101,6 @@ const friendAuthorIds = ref<Set<number>>(new Set())
 
 const isSearchResults = computed(() => Boolean(displayQuery.value.trim()))
 const showInitialFeedSkeleton = computed(() => !bootstrapped.value || (feedInitialLoading.value && posts.value.length === 0))
-const masonryColumns = computed(() => distributeIntoColumns(posts.value))
 const searchedMasonryColumns = computed(() => distributeIntoColumns(searchedPosts.value))
 const isGuestFallbackFeed = computed(() => Boolean(authStore.currentUser && feedGuestFallbackActive.value))
 const skeletonColumns = computed(() => buildFeedSkeletonColumns(columnCount.value, FEED_SKELETON_ROWS))
@@ -127,14 +121,48 @@ const currentChannelMeta = computed(() => (
   channelTabs.find((item) => item.key === activeChannel.value) || channelTabs[0]
 ))
 
-const audienceSegments = computed(() => channelTabs.filter((item) => item.key !== 'all' && item.key !== 'general'))
+const audienceSegments = computed(() => channelTabs.filter((item) => item.key !== 'all'))
+const currentChannelAvatar = computed(() => currentChannelMeta.value.avatar || 'https://picsum.photos/seed/vibelo-recommend/160/160')
+const currentChannelDescription = computed(() => currentChannelMeta.value.desc || '跨圈层内容流')
+const currentChannelSignal = computed(() => currentChannelMeta.value.signal || '实时更新')
+const isForYouChannel = computed(() => activeChannel.value === 'all')
+const recommendationName = computed(() => authStore.currentUser?.nickname || authStore.currentUser?.username || 'Vibelo 用户')
+const recommendationAvatar = computed(() => normalizeMediaUrl(authStore.currentUser?.avatarUrl) || 'https://api.dicebear.com/9.x/adventurer/svg?seed=vibelo-user')
+const recommendationInterests = computed(() => audienceSegments.value.slice(0, 4))
+const recommendationLeadPost = computed(() => isForYouChannel.value ? posts.value[0] : null)
+const recommendationSidePosts = computed(() => isForYouChannel.value ? posts.value.slice(1, 4) : [])
+const recommendationGuessPosts = computed(() => isForYouChannel.value ? posts.value.slice(1, 6) : [])
+const feedStreamPosts = computed(() => isForYouChannel.value ? posts.value.slice(6) : posts.value)
+const masonryColumns = computed(() => distributeIntoColumns(feedStreamPosts.value))
 
 const recommendedCreators = [
   { name: '课间小岛', bio: '大学生活 | 校园记录' },
   { name: '快门慢慢按', bio: '摄影爱好者 | 扫街练习' },
   { name: '漫展衣橱记', bio: '二次元穿搭 | 日常搭配' },
   { name: '毛球观察室', bio: '宠物日常 | 养宠记录' },
-  { name: '留学厨房笔记', bio: '留学生生活 | 一人食' },
+  { name: '摸鱼效率局', bio: '程序员摸鱼 | AI 工具' },
+]
+
+const recommendationTabs = [
+  { key: 'recommend', label: '综合推荐', mode: 'recommend' },
+  { key: 'following', label: '你关注的人', mode: 'following' },
+  { key: 'trend', label: '趋势内容' },
+  { key: 'nearby', label: '同城' },
+  { key: 'fresh', label: '新鲜发布' },
+  { key: 'longform', label: '长文精选' },
+] satisfies Array<{ key: string; label: string; mode?: FeedModeKey }>
+
+const hotTopicRows = [
+  { name: '春日影像计划', heat: '12.8万浏览' },
+  { name: '宠物的治愈瞬间', heat: '9.6万浏览' },
+  { name: '校园春日限定', heat: '7.2万浏览' },
+  { name: 'AI工具测评', heat: '4.1万浏览' },
+]
+
+const watchLaterRows = [
+  { title: '手机摄影进阶构图', meta: '8分钟阅读', image: 'https://picsum.photos/seed/watch-photo/120/80' },
+  { title: '如何高效整理灵感写作', meta: '6分钟阅读', image: 'https://picsum.photos/seed/watch-notes/120/80' },
+  { title: '猫咪为什么喜欢躲门口', meta: '5分钟阅读', image: 'https://picsum.photos/seed/watch-pet/120/80' },
 ]
 
 let intersectionObserver: IntersectionObserver | null = null
@@ -224,6 +252,9 @@ function postSearchTokens(post: PostView) {
   const tokens = [
     normalizedText(post.title),
     normalizedText(post.content),
+    normalizedText(post.channelCode),
+    normalizedText(post.channel),
+    normalizedText(post.postType),
     normalizedText(post.topicPath),
     ...(post.tags || []).map((item) => normalizedText(item)),
     ...(post.semanticTags || []).map((item) => normalizedText(item)),
@@ -236,6 +267,7 @@ function postMatchesCurrentChannel(post: PostView) {
   if (activeChannel.value === 'all') return true
   const channel = channelTabs.find((item) => item.key === activeChannel.value)
   if (!channel) return true
+  if (post.channelCode === channel.key || post.channel === channel.key) return true
   const haystack = postSearchTokens(post)
   if (!haystack) return false
   return channel.keywords.some((keyword) => haystack.includes(normalizedText(keyword)))
@@ -284,13 +316,6 @@ function normalizeMediaUrl(url?: string | null) {
   return url.replace('http://localhost:9000', '/minio-img')
 }
 
-function formatCompactCount(value?: number | null) {
-  const count = Number(value || 0)
-  if (count >= 10000) return `${(count / 10000).toFixed(count >= 100000 ? 0 : 1)}万`
-  if (count >= 1000) return `${(count / 1000).toFixed(count >= 10000 ? 0 : 1)}k`
-  return String(count)
-}
-
 function displayedLikeCount(post: PostView) {
   return likeCountOverrides.value[post.id] ?? post.likeCount
 }
@@ -301,10 +326,6 @@ function isPostLiked(postId: number) {
 
 function isPostLiking(postId: number) {
   return likingPostIds.value.has(postId)
-}
-
-function formatFeedTime(createdAt?: string) {
-  return formatRelativeTimeZh(createdAt)
 }
 
 function creatorAvatar(index: number) {
@@ -441,10 +462,16 @@ function queueFeedBatch(batch: PostView[], immediateCount: number) {
   }
 }
 
-function navigateToPost(postId: number) {
+function navigateToPost(post: PostView) {
   sessionStorage.setItem(FEED_SCROLL_Y_KEY, String(window.scrollY))
   sessionStorage.setItem(FEED_SCROLL_RESTORE_KEY, '1')
-  void router.push(`/posts/${postId}`)
+  void api.trackBehavior({
+    postId: post.id,
+    channelCode: post.channelCode || post.channel,
+    behaviorType: 'click',
+    scene: 'feed',
+  }).catch(() => undefined)
+  void router.push(`/posts/${post.id}`)
 }
 
 async function handleTogglePostLike(post: PostView) {
@@ -523,42 +550,6 @@ function distributeIntoColumns(items: PostView[]) {
   }
 
   return columns
-}
-
-function getCoverAspectRatio(post: PostView) {
-  const asset = post.assets?.[0]
-  const width = Number(asset?.width || 0)
-  const height = Number(asset?.height || 0)
-  return width > 0 && height > 0 ? `${width} / ${height}` : coverAspectRatio(post.id)
-}
-
-function hasPostMedia(post: PostView) {
-  return postHasRealMedia(post)
-}
-
-function markFeedCoverLoaded(postId: number) {
-  loadedCoversSet.value = new Set([...loadedCoversSet.value, postId])
-}
-
-function resolveFeedCover(post: PostView) {
-  return coverFallbackMap.value[post.id] || getPostMediaUrl(post)
-}
-
-function handleFeedCoverError(post: PostView) {
-  const candidates = getPostMediaCandidates(post)
-
-  for (const candidate of candidates) {
-    if (coverFallbackMap.value[post.id] !== candidate) {
-      coverFallbackMap.value = { ...coverFallbackMap.value, [post.id]: candidate }
-      return
-    }
-  }
-
-  markFeedCoverLoaded(post.id)
-}
-
-function isFeedCoverLoaded(postId: number) {
-  return loadedCoversSet.value.has(postId)
 }
 
 function pickMergeBatch(records: PostView[]) {
@@ -650,8 +641,6 @@ function resetFeedState() {
   total.value = null
   posts.value = []
   feedError.value = ''
-  loadedCoversSet.value = new Set()
-  coverFallbackMap.value = {}
   feedHasMore.value = true
   prefetchedFeedPage.value = null
   prefetchingFeed.value = false
@@ -687,8 +676,6 @@ function restoreFeedFromCache() {
     feedNextPage.value = Math.max(2, Number(payload.nextPage || 2))
     feedHasMore.value = Boolean(payload.hasMore) && posts.value.length < FEED_MAX_ITEMS
     feedError.value = ''
-    loadedCoversSet.value = new Set()
-    coverFallbackMap.value = {}
     return posts.value.length > 0
   } catch {
     sessionStorage.removeItem(currentFeedCacheKey())
@@ -903,7 +890,6 @@ async function loadInitialFeed() {
     total.value = typeof data.total === 'number' ? data.total : null
     feedNextPage.value = 2
     prefetchedFeedPage.value = null
-    loadedCoversSet.value = new Set()
     feedHasMore.value = (data.records || []).length >= requestSize
       && posts.value.length < FEED_MAX_ITEMS
       && (typeof data.total !== 'number' || posts.value.length < data.total)
@@ -1044,8 +1030,6 @@ function clearSearchResults(reload = true) {
   searchResultsTab.value = 'posts'
   searchedPosts.value = []
   searchedUsers.value = []
-  loadedCoversSet.value = new Set()
-  coverFallbackMap.value = {}
   prefetchedFeedPage.value = null
   resetBackgroundFeedWarmup()
   if (reload) void loadInitialFeed()
@@ -1069,6 +1053,18 @@ function selectChannel(channel: ChannelKey) {
   void reloadFeedByScope()
 }
 
+function selectFeedMode(mode: FeedModeKey) {
+  if (activeFeedMode.value === mode) return
+  activeFeedMode.value = mode
+  syncFeedQueryToRoute()
+  void reloadFeedByScope()
+}
+
+function selectRecommendationTab(tab: { mode?: FeedModeKey }) {
+  if (!tab.mode) return
+  selectFeedMode(tab.mode)
+}
+
 async function handleToggleFollow(authorId: number) {
   if (!authStore.currentUser) {
     authStore.openAuthPrompt('manual')
@@ -1088,15 +1084,6 @@ async function handleToggleFollow(authorId: number) {
   }
   followingAuthorIds.value = new Set(followingAuthorIds.value)
 }
-
-watch(
-  () => searchedPosts.value,
-  () => {
-    loadedCoversSet.value = new Set()
-    coverFallbackMap.value = {}
-  },
-  { deep: false },
-)
 
 watch(
   () => posts.value.length,
@@ -1243,6 +1230,82 @@ onUnmounted(() => {
           个性化推荐暂时较慢，当前展示探索流。
         </div>
 
+        <section
+          v-if="!isSearchResults"
+          class="feed-home__channel-hero"
+          :class="{ 'is-recommend': isForYouChannel }"
+        >
+          <template v-if="isForYouChannel">
+            <img class="feed-home__hero-avatar" :src="recommendationAvatar" alt="" />
+            <div class="feed-home__hero-copy">
+              <span>为你整理</span>
+              <h1>下午好，{{ recommendationName }}</h1>
+              <p>根据你最近浏览的内容，为你优先整理摄影、宠物日常、校园生活和效率工具方向的推荐。</p>
+              <div class="feed-home__interest-pills">
+                <button
+                  v-for="item in recommendationInterests"
+                  :key="item.key"
+                  type="button"
+                  @click="selectChannel(item.key)"
+                >
+                  {{ item.label }}
+                </button>
+              </div>
+            </div>
+          </template>
+          <template v-else>
+            <img class="feed-home__hero-avatar" :src="currentChannelAvatar" alt="" />
+            <div class="feed-home__hero-copy">
+              <span>{{ currentChannelSignal }}</span>
+              <h1>{{ currentChannelMeta.label }}</h1>
+              <p>{{ currentChannelDescription }}</p>
+            </div>
+          </template>
+          <button type="button" class="feed-home__publish-btn" @click="router.push('/publish')">发布内容</button>
+        </section>
+
+        <section v-if="!isSearchResults" class="feed-home__tabs-row">
+          <div v-if="isForYouChannel" class="feed-home__tabs feed-home__tabs--recommend">
+            <button
+              v-for="item in recommendationTabs"
+              :key="item.key"
+              type="button"
+              class="feed-home__tab"
+              :class="{ 'is-active': item.mode ? activeFeedMode === item.mode : false }"
+              @click="selectRecommendationTab(item)"
+            >
+              {{ item.label }}
+            </button>
+          </div>
+          <div v-else class="feed-home__tabs">
+            <button
+              v-for="item in feedModeTabs"
+              :key="item.key"
+              type="button"
+              class="feed-home__tab"
+              :class="{ 'is-active': activeFeedMode === item.key }"
+              @click="selectFeedMode(item.key)"
+            >
+              {{ item.label }}
+            </button>
+          </div>
+          <div v-if="!isForYouChannel" class="feed-home__tabs feed-home__tabs--channel">
+            <button
+              v-for="item in channelTabs"
+              :key="item.key"
+              type="button"
+              class="feed-home__tab feed-home__tab--channel"
+              :class="{ 'is-active': activeChannel === item.key }"
+              @click="selectChannel(item.key)"
+            >
+              {{ item.label }}
+            </button>
+          </div>
+          <button type="button" class="feed-home__layout-btn" title="刷新" aria-label="刷新" @click="reloadFeedByScope">
+            <el-icon><RefreshRight /></el-icon>
+          </button>
+        </section>
+
         <section v-if="isSearchResults" class="feed-home__search-result-head">
           <div>
             <el-icon>
@@ -1278,50 +1341,63 @@ onUnmounted(() => {
           </div>
 
           <div v-else-if="posts.length > 0" class="feed-home__stream">
+            <section v-if="isForYouChannel && recommendationLeadPost" class="feed-home__recommend-overview">
+              <div class="feed-home__recommend-lead">
+                <FeedCardRenderer
+                  :post="recommendationLeadPost"
+                  :is-liked="isPostLiked(recommendationLeadPost.id)"
+                  :is-liking="isPostLiking(recommendationLeadPost.id)"
+                  :like-count="displayedLikeCount(recommendationLeadPost)"
+                  @open="navigateToPost"
+                  @like="handleTogglePostLike"
+                />
+              </div>
+
+              <div class="feed-home__recommend-stack">
+                <article
+                  v-for="(post, index) in recommendationSidePosts"
+                  :key="`side-${post.id}`"
+                  @click="navigateToPost(post)"
+                >
+                  <span>{{ index === 0 ? '继续浏览' : index === 1 ? '热门讨论' : '今日灵感' }}</span>
+                  <strong>{{ post.title || '值得继续看的内容' }}</strong>
+                  <small>{{ post.author.nickname }} · {{ post.channelCode || post.channel }}</small>
+                </article>
+              </div>
+            </section>
+
+            <section v-if="isForYouChannel && recommendationGuessPosts.length > 0" class="feed-home__guess-section">
+              <header>
+                <h2>猜你喜欢</h2>
+                <button type="button" @click="reloadFeedByScope">换一换</button>
+              </header>
+              <div class="feed-home__guess-row">
+                <FeedCardRenderer
+                  v-for="post in recommendationGuessPosts"
+                  :key="`guess-${post.id}`"
+                  :post="post"
+                  :is-liked="isPostLiked(post.id)"
+                  :is-liking="isPostLiking(post.id)"
+                  :like-count="displayedLikeCount(post)"
+                  @open="navigateToPost"
+                  @like="handleTogglePostLike"
+                />
+              </div>
+            </section>
+
             <section class="feed-home__waterfall" :style="{ '--column-count': String(columnCount) }">
               <div v-for="(column, columnIndex) in masonryColumns" :key="`col-${columnIndex}`"
                 class="feed-home__column">
-                <article v-for="post in column" :key="post.id" class="feed-home__card" @click="navigateToPost(post.id)">
-                  <div v-if="hasPostMedia(post)" class="feed-home__card-media">
-                    <div v-if="!isFeedCoverLoaded(post.id)" class="feed-home__card-skeleton ui-skeleton"
-                      :style="{ aspectRatio: getCoverAspectRatio(post) }" />
-                    <img class="feed-home__card-image" :class="{ 'is-visible': isFeedCoverLoaded(post.id) }"
-                      :src="resolveFeedCover(post)" alt="post image" loading="lazy" decoding="async"
-                      @load="markFeedCoverLoaded(post.id)" @error="handleFeedCoverError(post)" />
-                  </div>
-                  <div class="feed-home__card-body">
-                    <div class="feed-home__card-author">
-                      <img :src="normalizeMediaUrl(post.author.avatarUrl)" alt="" />
-                      <span>
-                        <strong>{{ post.author.nickname }}</strong>
-                        <small>{{ formatFeedTime(post.createdAt) }}</small>
-                      </span>
-                    </div>
-                    <h3>{{ post.title || '分享一刻值得收藏的日常' }}</h3>
-                    <p v-if="post.content?.trim()" class="feed-home__card-desc">{{ post.content }}</p>
-                    <div class="feed-home__card-actions">
-                      <button type="button" class="feed-home__action-btn" :class="{ 'is-liked': isPostLiked(post.id) }"
-                        :disabled="isPostLiking(post.id)" aria-label="点赞" @click.stop="handleTogglePostLike(post)">
-                        <span class="feed-home__action-glyph feed-home__heart-icon" aria-hidden="true">
-                          {{ isPostLiked(post.id) ? '♥' : '♡' }}
-                        </span>
-                        {{ formatCompactCount(displayedLikeCount(post)) }}
-                      </button>
-                      <button type="button" class="feed-home__action-btn" aria-label="查看评论"
-                        @click.stop="navigateToPost(post.id)">
-                        <el-icon class="feed-home__action-glyph">
-                          <ChatLineRound />
-                        </el-icon>
-                        {{ formatCompactCount(post.commentCount) }}
-                      </button>
-                      <button type="button" class="feed-home__action-btn" aria-label="分享" @click.stop>
-                        <el-icon class="feed-home__action-glyph">
-                          <Share />
-                        </el-icon>
-                      </button>
-                    </div>
-                  </div>
-                </article>
+                <FeedCardRenderer
+                  v-for="post in column"
+                  :key="post.id"
+                  :post="post"
+                  :is-liked="isPostLiked(post.id)"
+                  :is-liking="isPostLiking(post.id)"
+                  :like-count="displayedLikeCount(post)"
+                  @open="navigateToPost"
+                  @like="handleTogglePostLike"
+                />
               </div>
             </section>
 
@@ -1345,19 +1421,16 @@ onUnmounted(() => {
             <section class="feed-home__waterfall" :style="{ '--column-count': String(columnCount) }">
               <div v-for="(column, columnIndex) in searchedMasonryColumns" :key="`search-col-${columnIndex}`"
                 class="feed-home__column">
-                <article v-for="post in column" :key="post.id" class="feed-home__card" @click="navigateToPost(post.id)">
-                  <div v-if="hasPostMedia(post)" class="feed-home__card-media">
-                    <div v-if="!isFeedCoverLoaded(post.id)" class="feed-home__card-skeleton ui-skeleton"
-                      :style="{ aspectRatio: getCoverAspectRatio(post) }" />
-                    <img class="feed-home__card-image" :class="{ 'is-visible': isFeedCoverLoaded(post.id) }"
-                      :src="resolveFeedCover(post)" alt="post image" loading="lazy" decoding="async"
-                      @load="markFeedCoverLoaded(post.id)" @error="handleFeedCoverError(post)" />
-                  </div>
-                  <div class="feed-home__card-body">
-                    <h3>{{ post.title || '分享一刻值得收藏的日常' }}</h3>
-                    <p v-if="post.content?.trim()" class="feed-home__card-desc">{{ post.content }}</p>
-                  </div>
-                </article>
+                <FeedCardRenderer
+                  v-for="post in column"
+                  :key="post.id"
+                  :post="post"
+                  :is-liked="isPostLiked(post.id)"
+                  :is-liking="isPostLiking(post.id)"
+                  :like-count="displayedLikeCount(post)"
+                  @open="navigateToPost"
+                  @like="handleTogglePostLike"
+                />
               </div>
             </section>
             <div v-if="searchedPosts.length === 0" class="ui-state ui-state--empty feed-home__state">
@@ -1395,7 +1468,41 @@ onUnmounted(() => {
     </main>
 
     <aside class="feed-home__right-rail" aria-label="推荐信息">
-      <section class="feed-home__right-card">
+      <template v-if="isForYouChannel">
+        <section class="feed-home__right-card">
+          <div class="feed-home__right-title">
+            <strong>你的兴趣画像</strong>
+            <button type="button">编辑</button>
+          </div>
+          <div class="feed-home__interest-profile">
+            <button
+              v-for="item in recommendationInterests"
+              :key="`profile-${item.key}`"
+              type="button"
+              @click="selectChannel(item.key)"
+            >
+              {{ item.label }}
+            </button>
+          </div>
+          <p class="feed-home__right-note">基于你的浏览与互动行为分析得出</p>
+        </section>
+
+        <section class="feed-home__right-card">
+          <div class="feed-home__right-title">
+            <strong>今日热门话题</strong>
+            <button type="button">更多 <el-icon><ArrowRight /></el-icon></button>
+          </div>
+          <ol class="feed-home__topic-list">
+            <li v-for="(topic, index) in hotTopicRows" :key="topic.name">
+              <span>{{ index + 1 }}</span>
+              <strong># {{ topic.name }}</strong>
+              <em>{{ topic.heat }}</em>
+            </li>
+          </ol>
+        </section>
+      </template>
+
+      <section v-else class="feed-home__right-card">
         <div class="feed-home__right-title">
           <strong>人群频道</strong>
           <button type="button">更多 <el-icon>
@@ -1425,6 +1532,22 @@ onUnmounted(() => {
               <small>{{ creator.bio }}</small>
             </span>
             <button type="button">关注</button>
+          </article>
+        </div>
+      </section>
+
+      <section v-if="isForYouChannel" class="feed-home__right-card">
+        <div class="feed-home__right-title">
+          <strong>稍后再看</strong>
+          <button type="button">更多 <el-icon><ArrowRight /></el-icon></button>
+        </div>
+        <div class="feed-home__watch-list">
+          <article v-for="item in watchLaterRows" :key="item.title">
+            <img :src="item.image" alt="" />
+            <span>
+              <strong>{{ item.title }}</strong>
+              <small>{{ item.meta }}</small>
+            </span>
           </article>
         </div>
       </section>
@@ -1468,7 +1591,12 @@ onUnmounted(() => {
   top: 90px;
   z-index: 20;
   max-height: calc(100vh - 106px);
-  overflow: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.feed-home__right-rail::-webkit-scrollbar {
+  display: none;
 }
 
 .feed-home__left-rail {
@@ -1660,6 +1788,92 @@ onUnmounted(() => {
   padding: 10px;
 }
 
+.feed-home__channel-hero {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 118px;
+  margin-bottom: 12px;
+  padding: 18px;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(255, 90, 69, 0.10), rgba(72, 126, 255, 0.07)),
+    #fff;
+}
+
+.feed-home__channel-hero.is-recommend {
+  min-height: 144px;
+  background:
+    linear-gradient(135deg, rgba(255, 90, 69, 0.12), rgba(255, 202, 128, 0.12) 48%, rgba(72, 126, 255, 0.08)),
+    #fff;
+}
+
+.feed-home__hero-avatar {
+  width: 74px;
+  height: 74px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #f0f2f5;
+}
+
+.feed-home__hero-copy {
+  min-width: 0;
+}
+
+.feed-home__hero-copy > span {
+  color: #ff5a45;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.feed-home__hero-copy h1 {
+  margin: 4px 0;
+  color: #1f2531;
+  font-size: 26px;
+  font-weight: 840;
+  letter-spacing: 0;
+}
+
+.feed-home__hero-copy p {
+  margin: 0;
+  color: #6d7481;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.feed-home__interest-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.feed-home__interest-pills button {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 90, 69, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #ff5a45;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.feed-home__publish-btn {
+  height: 36px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 8px;
+  background: #ff5a45;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 760;
+}
+
 .feed-home__tabs-row {
   position: sticky;
   top: 74px;
@@ -1697,6 +1911,12 @@ onUnmounted(() => {
 
 .feed-home__tabs--channel {
   gap: 8px;
+}
+
+.feed-home__tabs--recommend {
+  grid-column: 1 / 3;
+  gap: 22px;
+  padding-left: 8px;
 }
 
 .feed-home__tab {
@@ -1798,6 +2018,102 @@ onUnmounted(() => {
 .feed-home__stream {
   display: flex;
   flex-direction: column;
+  gap: 12px;
+}
+
+.feed-home__recommend-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.75fr) minmax(260px, 0.95fr);
+  gap: 12px;
+}
+
+.feed-home__recommend-overview :deep(.channel-card) {
+  height: 100%;
+}
+
+.feed-home__recommend-lead :deep(.channel-card__image) {
+  max-height: 360px;
+}
+
+.feed-home__recommend-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.feed-home__recommend-stack article {
+  display: grid;
+  gap: 8px;
+  min-height: 112px;
+  padding: 16px;
+  border: 1px solid #e9edf3;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(32, 36, 47, 0.045);
+}
+
+.feed-home__recommend-stack article:hover {
+  border-color: rgba(255, 90, 69, 0.22);
+}
+
+.feed-home__recommend-stack span {
+  color: #ff5a45;
+  font-size: 12px;
+  font-weight: 780;
+}
+
+.feed-home__recommend-stack strong {
+  color: #222936;
+  font-size: 15px;
+  line-height: 1.42;
+}
+
+.feed-home__recommend-stack small {
+  color: #8a91a0;
+  font-size: 12px;
+}
+
+.feed-home__guess-section {
+  display: grid;
+  gap: 10px;
+}
+
+.feed-home__guess-section header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.feed-home__guess-section h2 {
+  margin: 0;
+  color: #1f2531;
+  font-size: 18px;
+  font-weight: 840;
+}
+
+.feed-home__guess-section button {
+  border: none;
+  background: transparent;
+  color: #8a91a0;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.feed-home__guess-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.feed-home__guess-row :deep(.channel-card__desc),
+.feed-home__guess-row :deep(.channel-card__meta) {
+  display: none;
+}
+
+.feed-home__guess-row :deep(.channel-card__image) {
+  min-height: 118px;
+  max-height: 158px;
 }
 
 .feed-home__waterfall,
@@ -2079,6 +2395,31 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
+.feed-home__interest-profile {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.feed-home__interest-profile button {
+  height: 30px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: #fff1ed;
+  color: #ff5a45;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.feed-home__right-note {
+  margin: 10px 0 0;
+  color: #9aa1ad;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .feed-home__creator-list {
   display: grid;
   gap: 12px;
@@ -2160,6 +2501,45 @@ onUnmounted(() => {
   margin-top: 8px;
   color: #ff4f3b;
   font-weight: 760;
+}
+
+.feed-home__watch-list {
+  display: grid;
+  gap: 12px;
+}
+
+.feed-home__watch-list article {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.feed-home__watch-list img {
+  width: 72px;
+  height: 52px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #eef1f5;
+}
+
+.feed-home__watch-list span {
+  min-width: 0;
+}
+
+.feed-home__watch-list strong {
+  display: block;
+  overflow: hidden;
+  color: #2f3441;
+  font-size: 13px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feed-home__watch-list small {
+  color: #8a91a0;
+  font-size: 12px;
 }
 
 .feed-home__footer-card {
@@ -2307,6 +2687,14 @@ onUnmounted(() => {
     margin-right: 0;
   }
 
+  .feed-home__recommend-overview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .feed-home__guess-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .feed-home__side-nav {
     grid-auto-flow: column;
     grid-auto-columns: max-content;
@@ -2352,6 +2740,35 @@ onUnmounted(() => {
 }
 
 @media (max-width: 640px) {
+  .feed-home__channel-hero {
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 12px;
+    min-height: 0;
+    padding: 14px;
+  }
+
+  .feed-home__hero-avatar {
+    width: 52px;
+    height: 52px;
+  }
+
+  .feed-home__hero-copy h1 {
+    font-size: 20px;
+  }
+
+  .feed-home__publish-btn {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .feed-home__interest-pills {
+    grid-column: 1 / -1;
+  }
+
+  .feed-home__guess-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .feed-home__card-body {
     padding: 11px 14px 13px;
   }

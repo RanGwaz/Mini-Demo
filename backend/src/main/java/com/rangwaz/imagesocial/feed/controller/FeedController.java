@@ -3,6 +3,7 @@ package com.rangwaz.imagesocial.feed.controller;
 import com.rangwaz.imagesocial.auth.SecurityUtils;
 import com.rangwaz.imagesocial.common.api.ApiResponse;
 import com.rangwaz.imagesocial.common.api.PageResponse;
+import com.rangwaz.imagesocial.common.exception.BusinessException;
 import com.rangwaz.imagesocial.feed.FeedFacetService;
 import com.rangwaz.imagesocial.feed.FeedOnlineMetricsService;
 import com.rangwaz.imagesocial.feed.FeedQuotaGuardService;
@@ -14,6 +15,8 @@ import com.rangwaz.imagesocial.feed.dto.FeedQuotaExperimentSnapshot;
 import com.rangwaz.imagesocial.feed.dto.FeedSourceHealthResponse;
 import com.rangwaz.imagesocial.feed.service.FeedService;
 import com.rangwaz.imagesocial.post.dto.PostView;
+import com.rangwaz.imagesocial.taxonomy.ContentChannel;
+import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -44,6 +47,28 @@ public class FeedController {
         this.feedSourceHealthTrackerService = feedSourceHealthTrackerService;
     }
 
+    @GetMapping
+    public ApiResponse<PageResponse<PostView>> feed(@RequestParam(defaultValue = "1") int page,
+                                                    @RequestParam(required = false) Integer pageSize,
+                                                    @RequestParam(required = false) Integer size,
+                                                    @RequestParam(required = false) String seed,
+                                                    @RequestParam(required = false) String channelCode,
+                                                    @RequestParam(required = false) String topic,
+                                                    @RequestParam(required = false) String style,
+                                                    @RequestParam(required = false) String tag) {
+        Long currentUserId = SecurityUtils.currentUserIdOrNull();
+        int resolvedSize = pageSize == null ? (size == null ? 24 : size) : pageSize;
+        return ApiResponse.success(feedService.homeFeed(
+                currentUserId,
+                page,
+                resolvedSize,
+                seed,
+                resolveTopicFilter(channelCode, topic),
+                style,
+                tag
+        ));
+    }
+
     @GetMapping("/home")
     public ApiResponse<PageResponse<PostView>> home(@RequestParam(defaultValue = "1") int page,
                                                     @RequestParam(defaultValue = "24") int size,
@@ -53,6 +78,25 @@ public class FeedController {
                                                     @RequestParam(required = false) String tag) {
         Long currentUserId = SecurityUtils.currentUserIdOrNull();
         return ApiResponse.success(feedService.homeFeed(currentUserId, page, size, seed, topic, style, tag));
+    }
+
+    private String resolveTopicFilter(String channelCode, String topic) {
+        if (channelCode == null || channelCode.isBlank() || "all".equalsIgnoreCase(channelCode.trim())) {
+            return topic;
+        }
+        ContentChannel channel = ContentChannel.fromKey(channelCode)
+                .orElseThrow(() -> new BusinessException("频道不存在"));
+        String channelTerms = java.util.stream.Stream.concat(
+                        java.util.stream.Stream.of(channel.key(), channel.label(), channel.topicPath()),
+                        channel.aliases().stream()
+                )
+                .filter(value -> value != null && !value.isBlank())
+                .distinct()
+                .collect(Collectors.joining(" "));
+        if (topic == null || topic.isBlank()) {
+            return channelTerms;
+        }
+        return channelTerms + " " + topic;
     }
 
     @GetMapping("/home/diagnostics")
