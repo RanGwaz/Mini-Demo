@@ -1186,3 +1186,225 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+
+  - changeSet:
+      id: 055-create-content-channels
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          tableExists:
+            tableName: channels
+      changes:
+        - createTable:
+            tableName: channels
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: code
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: name
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: description
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: true
+              - column:
+                  name: icon
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: true
+              - column:
+                  name: sort_order
+                  type: INT
+                  defaultValueNumeric: 0
+              - column:
+                  name: enabled
+                  type: TINYINT
+                  defaultValueNumeric: 1
+              - column:
+                  name: created_at
+                  type: DATETIME
+                  defaultValueComputed: CURRENT_TIMESTAMP
+              - column:
+                  name: updated_at
+                  type: DATETIME
+                  defaultValueComputed: CURRENT_TIMESTAMP
+
+  - changeSet:
+      id: 056-upsert-content-channels
+      author: rangwaz
+      changes:
+        - sql:
+            splitStatements: true
+            stripComments: false
+            sql: |
+              INSERT INTO channels (code, name, description, sort_order) VALUES
+              ('campus', '校园生活', '大学生校园日常、吐槽、学习、生活分享', 1),
+              ('anime_outfit', '二次元穿搭', '二次元风格穿搭、角色灵感、日系搭配', 2),
+              ('pet', '宠物日常', '猫狗萌宠、宠物生活、治愈瞬间', 3),
+              ('photography', '摄影分享', '摄影作品、拍摄参数、地点分享', 4),
+              ('tech_moment', '程序员摸鱼', '程序员日常、AI工具、效率工具、技术趣事', 5)
+              ON DUPLICATE KEY UPDATE
+                name = VALUES(name),
+                description = VALUES(description),
+                sort_order = VALUES(sort_order),
+                enabled = 1;
+
+  - changeSet:
+      id: 057-posts-channel-code
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: posts
+            columnName: channel_code
+      changes:
+        - addColumn:
+            tableName: posts
+            columns:
+              - column:
+                  name: channel_code
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: true
+
+  - changeSet:
+      id: 058-posts-post-type
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: posts
+            columnName: post_type
+      changes:
+        - addColumn:
+            tableName: posts
+            columns:
+              - column:
+                  name: post_type
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: true
+
+  - changeSet:
+      id: 059-posts-extra
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: posts
+            columnName: extra
+      changes:
+        - addColumn:
+            tableName: posts
+            columns:
+              - column:
+                  name: extra
+                  type: TEXT
+                  constraints:
+                    nullable: true
+
+  - changeSet:
+      id: 060-posts-share-count
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          columnExists:
+            tableName: posts
+            columnName: share_count
+      changes:
+        - addColumn:
+            tableName: posts
+            columns:
+              - column:
+                  name: share_count
+                  type: INT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 061-backfill-post-channel-model
+      author: rangwaz
+      changes:
+        - sql:
+            splitStatements: true
+            stripComments: false
+            sql: |
+              UPDATE posts
+              SET channel_code = CASE
+                WHEN topic_cluster_key IN ('campus', 'campus_life') OR topic_path LIKE '%校园%' THEN 'campus'
+                WHEN topic_cluster_key = 'anime_outfit' OR topic_path LIKE '%二次元%' OR topic_path LIKE '%穿搭%' THEN 'anime_outfit'
+                WHEN topic_cluster_key IN ('pet', 'pets') OR topic_path LIKE '%宠物%' THEN 'pet'
+                WHEN topic_cluster_key = 'photography' OR topic_path LIKE '%摄影%' THEN 'photography'
+                WHEN topic_cluster_key IN ('tech_moment', 'tool_post') OR topic_path LIKE '%程序员%' OR topic_path LIKE '%AI%' THEN 'tech_moment'
+                ELSE 'campus'
+              END
+              WHERE channel_code IS NULL OR channel_code = '';
+              UPDATE posts
+              SET post_type = CASE channel_code
+                WHEN 'campus' THEN 'campus_post'
+                WHEN 'anime_outfit' THEN 'anime_outfit_post'
+                WHEN 'pet' THEN 'pet_post'
+                WHEN 'photography' THEN 'photography_post'
+                WHEN 'tech_moment' THEN 'tech_moment_post'
+                ELSE 'campus_post'
+              END
+              WHERE post_type IS NULL OR post_type = '';
+              UPDATE posts
+              SET extra = '{}'
+              WHERE extra IS NULL OR extra = '';
+
+  - changeSet:
+      id: 062-posts-channel-created-index
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          indexExists:
+            tableName: posts
+            indexName: idx_posts_channel_created
+      changes:
+        - createIndex:
+            tableName: posts
+            indexName: idx_posts_channel_created
+            columns:
+              - column:
+                  name: channel_code
+              - column:
+                  name: created_at
+
+  - changeSet:
+      id: 063-posts-post-type-index
+      author: rangwaz
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          indexExists:
+            tableName: posts
+            indexName: idx_posts_post_type
+      changes:
+        - createIndex:
+            tableName: posts
+            indexName: idx_posts_post_type
+            columns:
+              - column:
+                  name: post_type
