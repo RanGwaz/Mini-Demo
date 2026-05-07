@@ -66,6 +66,12 @@ export interface PostAssetView {
   sortOrder: number
 }
 
+export interface PostImageView {
+  url: string
+  width?: number
+  height?: number
+}
+
 export interface PostView {
   id: number
   author: UserSummary
@@ -73,15 +79,21 @@ export interface PostView {
   content?: string
   tags: string[]
   channel?: string
+  channelCode?: string
+  postType?: string
   topicPath?: string
   semanticTags?: string[]
   styleTags?: string[]
   assets: PostAssetView[]
+  images?: PostImageView[]
   coverUrl: string
   thumbUrl?: string
+  extra?: Record<string, unknown>
   likeCount: number
   favoriteCount: number
+  collectCount?: number
   commentCount: number
+  shareCount?: number
   viewCount: number
   recommendationReason?: string
   createdAt: string

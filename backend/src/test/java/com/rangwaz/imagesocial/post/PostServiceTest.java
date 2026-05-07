@@ -7,6 +7,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rangwaz.imagesocial.auth.dto.UserSummary;
 import com.rangwaz.imagesocial.common.exception.BusinessException;
 import com.rangwaz.imagesocial.domain.entity.Post;
@@ -71,7 +72,8 @@ class PostServiceTest {
                 contentReportMapper,
                 userService,
                 eventService,
-                searchIndexGateway
+                searchIndexGateway,
+                new ObjectMapper()
         );
     }
 
@@ -96,7 +98,7 @@ class PostServiceTest {
         CreatePostRequest request = new CreatePostRequest(
                 "纯文字标题",
                 "没有图片也应该能发布",
-                ContentChannel.CAMPUS_LIFE.key(),
+                ContentChannel.CAMPUS.key(),
                 List.of("大学生校园生活", "学习笔记", "效率工具"),
                 List.of()
         );
@@ -109,11 +111,22 @@ class PostServiceTest {
 
         assertThat(insertedPost.getCoverUrl()).isEmpty();
         assertThat(insertedPost.getTags()).isEqualTo("学习笔记,效率工具");
-        assertThat(insertedPost.getTopicPath()).isEqualTo(ContentChannel.CAMPUS_LIFE.topicPath());
-        assertThat(insertedPost.getTopicClusterKey()).isEqualTo(ContentChannel.CAMPUS_LIFE.key());
+        assertThat(insertedPost.getChannelCode()).isEqualTo(ContentChannel.CAMPUS.key());
+        assertThat(insertedPost.getPostType()).isEqualTo(ContentChannel.CAMPUS.postType());
+        assertThat(insertedPost.getExtra()).isEqualTo("{}");
+        assertThat(insertedPost.getTopicPath()).isEqualTo(ContentChannel.CAMPUS.topicPath());
+        assertThat(insertedPost.getSemanticTags()).contains(ContentChannel.CAMPUS.key());
+        assertThat(insertedPost.getStyleTags()).isEqualTo("text");
+        assertThat(insertedPost.getTopicClusterKey()).isEqualTo(ContentChannel.CAMPUS.key());
+        assertThat(insertedPost.getSubtopicClusterKey()).isEqualTo("学习笔记");
         assertThat(insertedPost.getTaxonomyVersion()).isEqualTo(ContentChannel.TAXONOMY_VERSION);
+        assertThat(insertedPost.getQualityScore()).isPositive();
+        assertThat(insertedPost.getSafetyScore()).isEqualByComparingTo("1.0000");
         assertThat(view.assets()).isEmpty();
-        assertThat(view.channel()).isEqualTo(ContentChannel.CAMPUS_LIFE.key());
+        assertThat(view.channel()).isEqualTo(ContentChannel.CAMPUS.key());
+        assertThat(view.channelCode()).isEqualTo(ContentChannel.CAMPUS.key());
+        assertThat(view.postType()).isEqualTo(ContentChannel.CAMPUS.postType());
+        assertThat(view.extra()).isEmpty();
         assertThat(view.tags()).containsExactly("学习笔记", "效率工具");
         verify(postAssetMapper, never()).insert(any(PostAsset.class));
     }

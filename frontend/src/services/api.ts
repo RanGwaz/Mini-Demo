@@ -28,6 +28,7 @@ export interface CreatePostAssetPayload {
 }
 
 export interface FeedQueryFilters {
+  channelCode?: string
   topic?: string
   style?: string
   tag?: string
@@ -45,6 +46,16 @@ export interface PublishTagSuggestion {
 export interface PublishSuggestionsResponse {
   quickTags: string[]
   trendingTags: PublishTagSuggestion[]
+}
+
+export interface ChannelView {
+  code: string
+  name: string
+  description: string
+  icon?: string
+  sortOrder: number
+  postType: string
+  waterfall: boolean
 }
 
 const slowRequestConfig = {
@@ -78,17 +89,21 @@ export const api = {
   },
   homeFeed(page = 1, size = 50, seed?: string, filters?: FeedQueryFilters, authMode: FeedRequestAuthMode = 'session') {
     const client = authMode === 'guest' ? guestHttp : http
-    return unwrap<PageResponse<PostView>>(client.get('/api/feed/home', {
+    return unwrap<PageResponse<PostView>>(client.get('/api/feed', {
       ...slowRequestConfig,
       params: {
         page,
-        size,
+        pageSize: size,
         ...(seed ? { seed } : {}),
+        ...(filters?.channelCode ? { channelCode: filters.channelCode } : {}),
         ...(filters?.topic ? { topic: filters.topic } : {}),
         ...(filters?.style ? { style: filters.style } : {}),
         ...(filters?.tag ? { tag: filters.tag } : {}),
       },
     }))
+  },
+  channels() {
+    return unwrap<ChannelView[]>(guestHttp.get('/api/channels'))
   },
   similarPosts(postId: number, page = 1, size = 24, filters?: FeedQueryFilters, authMode: FeedRequestAuthMode = 'session') {
     const client = authMode === 'guest' ? guestHttp : http
@@ -116,10 +131,24 @@ export const api = {
     title: string
     content: string
     channel: string
+    channelCode?: string
+    postType?: string
+    imageUrls?: string[]
+    extra?: Record<string, unknown>
     tags?: string[]
     assets?: CreatePostAssetPayload[]
   }) {
     return unwrap<PostView>(http.post('/api/posts', payload))
+  },
+  trackBehavior(payload: {
+    postId: number
+    channelCode?: string
+    behaviorType: string
+    duration?: number
+    scene?: string
+    position?: number
+  }) {
+    return unwrap<void>(http.post('/api/behaviors', payload))
   },
   publishSuggestions(channel?: string, keyword?: string) {
     return unwrap<PublishSuggestionsResponse>(guestHttp.get('/api/taxonomy/publish-suggestions', {

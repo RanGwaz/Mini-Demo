@@ -14,8 +14,11 @@ public class Post {
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long authorId;
+    private String channelCode;
+    private String postType;
     private String title;
     private String content;
+    private String extra;
     private String tags;
     private String topicPath;
     private String semanticTags;
@@ -30,6 +33,7 @@ public class Post {
     private Integer likeCount;
     private Integer favoriteCount;
     private Integer commentCount;
+    private Integer shareCount;
     private Long viewCount;
     private BigDecimal hotScore;
     private BigDecimal qualityScore;
