@@ -25,11 +25,11 @@ public class TaxonomyService {
     );
 
     private static final Map<String, List<String>> CHANNEL_QUICK_TAGS = Map.of(
-            "campus", List.of("宿舍", "课程", "期末周", "社团", "自习室", "食堂", "校园摄影", "学习笔记"),
+            "campus_life", List.of("校园生活", "宿舍", "课程", "期末周", "社团", "自习室", "食堂", "校园摄影"),
             "photography", List.of("街拍", "胶片", "构图", "人像", "风景", "后期", "相机", "镜头"),
             "anime_outfit", List.of("二次元", "漫展", "cos", "谷子", "痛包", "穿搭", "手办", "游戏美术"),
-            "pet", List.of("猫咪", "狗狗", "萌宠", "养宠经验", "领养", "洗护", "治愈瞬间", "宠物档案"),
-            "tech_moment", List.of("AI工具", "效率工具", "开发工具", "摸鱼", "Cursor", "自动化", "代码重构", "工作流")
+            "pets", List.of("猫咪", "狗狗", "萌宠", "养宠经验", "宠物日常", "领养", "洗护", "治愈瞬间"),
+            "overseas", List.of("留学", "租房", "课程", "交换生", "海外生活", "做饭", "城市探索", "语言学习")
     );
 
     private static final List<String> TRENDING_SEEDS = List.of(
@@ -47,7 +47,7 @@ public class TaxonomyService {
         String channelKey = ContentChannel.fromKey(rawChannel)
                 .map(ContentChannel::key)
                 .filter(key -> !"general".equals(key))
-                .orElse("campus");
+                .orElse("campus_life");
         String keyword = normalizeTag(rawKeyword).toLowerCase(Locale.ROOT);
 
         LinkedHashMap<String, Integer> scores = new LinkedHashMap<>();

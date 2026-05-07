@@ -23,6 +23,8 @@ import { useAuthStore } from '../stores/auth'
 import type { PostView, UserSummary } from '../types'
 import {
   DEFAULT_IMAGE_PLACEHOLDER,
+  getPostMediaCandidates,
+  getPostMediaUrl,
   hasPostMedia as postHasRealMedia,
   normalizeMediaUrl as normalizePostMediaUrl,
 } from '../utils/postMedia'
@@ -550,6 +552,42 @@ function distributeIntoColumns(items: PostView[]) {
   }
 
   return columns
+}
+
+function getCoverAspectRatio(post: PostView) {
+  const asset = post.assets?.[0]
+  const width = Number(asset?.width || 0)
+  const height = Number(asset?.height || 0)
+  return width > 0 && height > 0 ? `${width} / ${height}` : coverAspectRatio(post.id)
+}
+
+function hasPostMedia(post: PostView) {
+  return postHasRealMedia(post)
+}
+
+function markFeedCoverLoaded(postId: number) {
+  loadedCoversSet.value = new Set([...loadedCoversSet.value, postId])
+}
+
+function resolveFeedCover(post: PostView) {
+  return coverFallbackMap.value[post.id] || getPostMediaUrl(post)
+}
+
+function handleFeedCoverError(post: PostView) {
+  const candidates = getPostMediaCandidates(post)
+
+  for (const candidate of candidates) {
+    if (coverFallbackMap.value[post.id] !== candidate) {
+      coverFallbackMap.value = { ...coverFallbackMap.value, [post.id]: candidate }
+      return
+    }
+  }
+
+  markFeedCoverLoaded(post.id)
+}
+
+function isFeedCoverLoaded(postId: number) {
+  return loadedCoversSet.value.has(postId)
 }
 
 function pickMergeBatch(records: PostView[]) {
@@ -1388,16 +1426,47 @@ onUnmounted(() => {
             <section class="feed-home__waterfall" :style="{ '--column-count': String(columnCount) }">
               <div v-for="(column, columnIndex) in masonryColumns" :key="`col-${columnIndex}`"
                 class="feed-home__column">
-                <FeedCardRenderer
-                  v-for="post in column"
-                  :key="post.id"
-                  :post="post"
-                  :is-liked="isPostLiked(post.id)"
-                  :is-liking="isPostLiking(post.id)"
-                  :like-count="displayedLikeCount(post)"
-                  @open="navigateToPost"
-                  @like="handleTogglePostLike"
-                />
+                <article v-for="post in column" :key="post.id" class="feed-home__card" @click="navigateToPost(post.id)">
+                  <div v-if="hasPostMedia(post)" class="feed-home__card-media">
+                    <div v-if="!isFeedCoverLoaded(post.id)" class="feed-home__card-skeleton ui-skeleton"
+                      :style="{ aspectRatio: getCoverAspectRatio(post) }" />
+                    <img class="feed-home__card-image" :class="{ 'is-visible': isFeedCoverLoaded(post.id) }"
+                      :src="resolveFeedCover(post)" alt="post image" loading="lazy" decoding="async"
+                      @load="markFeedCoverLoaded(post.id)" @error="handleFeedCoverError(post)" />
+                  </div>
+                  <div class="feed-home__card-body">
+                    <div class="feed-home__card-author">
+                      <img :src="normalizeMediaUrl(post.author.avatarUrl)" alt="" />
+                      <span>
+                        <strong>{{ post.author.nickname }}</strong>
+                        <small>{{ formatFeedTime(post.createdAt) }}</small>
+                      </span>
+                    </div>
+                    <h3>{{ post.title || '分享一刻值得收藏的日常' }}</h3>
+                    <p v-if="post.content?.trim()" class="feed-home__card-desc">{{ post.content }}</p>
+                    <div class="feed-home__card-actions">
+                      <button type="button" class="feed-home__action-btn" :class="{ 'is-liked': isPostLiked(post.id) }"
+                        :disabled="isPostLiking(post.id)" aria-label="点赞" @click.stop="handleTogglePostLike(post)">
+                        <span class="feed-home__action-glyph feed-home__heart-icon" aria-hidden="true">
+                          {{ isPostLiked(post.id) ? '♥' : '♡' }}
+                        </span>
+                        {{ formatCompactCount(displayedLikeCount(post)) }}
+                      </button>
+                      <button type="button" class="feed-home__action-btn" aria-label="查看评论"
+                        @click.stop="navigateToPost(post.id)">
+                        <el-icon class="feed-home__action-glyph">
+                          <ChatLineRound />
+                        </el-icon>
+                        {{ formatCompactCount(post.commentCount) }}
+                      </button>
+                      <button type="button" class="feed-home__action-btn" aria-label="分享" @click.stop>
+                        <el-icon class="feed-home__action-glyph">
+                          <Share />
+                        </el-icon>
+                      </button>
+                    </div>
+                  </div>
+                </article>
               </div>
             </section>
 

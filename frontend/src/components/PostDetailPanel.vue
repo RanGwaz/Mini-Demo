@@ -10,7 +10,6 @@ import {
   getPostMediaUrl,
   normalizeMediaUrl,
 } from '../utils/postMedia'
-import { formatRelativeTimeZh } from '../utils/relativeTime'
 
 type DisplayAsset = {
   id?: number
