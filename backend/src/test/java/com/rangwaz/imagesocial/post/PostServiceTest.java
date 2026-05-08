@@ -132,6 +132,41 @@ class PostServiceTest {
     }
 
     @Test
+    void fallsBackToDefaultTitleWhenTitleIsBlank() {
+        Long authorId = 7L;
+        User author = new User();
+        author.setId(authorId);
+        author.setUsername("creator");
+        author.setNickname("Creator");
+        UserSummary summary = new UserSummary(authorId, "creator", null, "Creator", null, null, null);
+
+        when(userService.requireById(authorId)).thenReturn(author);
+        when(userService.toSummary(author)).thenReturn(summary);
+        when(postAssetMapper.selectByPostId(101L)).thenReturn(List.of());
+        when(postMapper.insert(any(Post.class))).thenAnswer(invocation -> {
+            Post post = invocation.getArgument(0);
+            post.setId(101L);
+            return 1;
+        });
+
+        CreatePostRequest request = new CreatePostRequest(
+                "   ",
+                "",
+                ContentChannel.CAMPUS.key(),
+                List.of(),
+                List.of()
+        );
+
+        postService.createPost(authorId, request);
+
+        ArgumentCaptor<Post> postCaptor = ArgumentCaptor.forClass(Post.class);
+        verify(postMapper).insert(postCaptor.capture());
+        Post insertedPost = postCaptor.getValue();
+        assertThat(insertedPost.getTitle()).isEqualTo("无标题分享");
+        assertThat(insertedPost.getContent()).isEqualTo("");
+    }
+
+    @Test
     void rejectsUnknownChannelKeys() {
         when(userService.requireById(7L)).thenReturn(new User());
 

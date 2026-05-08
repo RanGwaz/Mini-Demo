@@ -6,24 +6,25 @@ import {
   Check,
   CircleCheck,
   Close,
-  Document,
-  Picture,
+  Edit,
   Plus,
   UploadFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import PublishFormRenderer from '../components/publish/PublishFormRenderer.vue'
 import { channelConfig } from '../config/channelConfig'
 import { defaultPublishChannelKey, publishChannels, type PublishChannelKey } from '../domain/contentTaxonomy'
 import { api, type CreatePostAssetPayload, type PublishTagSuggestion } from '../services/api'
 import { useAuthStore } from '../stores/auth'
 import type { UploadResponse } from '../types'
 
-type PublishKind = 'text' | 'image'
 type PreviewMode = 'note' | 'cover'
-const MAX_TAGS_PER_POST = 7
+
+const TITLE_LIMIT = 20
+const CONTENT_LIMIT = 1000
+const MAX_TOPICS_PER_POST = 7
+const RECOMMEND_TOPIC_LIMIT = 6
 
 type CoverPreviewCard = {
   key: string
@@ -33,11 +34,9 @@ type CoverPreviewCard = {
   cover: string
   content: string
   current: boolean
-  height: string
   likes: number
   comments: number
-  tag: string
-  duration?: string
+  topic: string
 }
 
 const router = useRouter()
@@ -47,89 +46,63 @@ authStore.hydrate()
 const loading = ref(false)
 const saving = ref(false)
 const uploading = ref(false)
-const tagLoading = ref(false)
-const selectedKind = ref<PublishKind>('text')
+const topicLoading = ref(false)
 const previewMode = ref<PreviewMode>('note')
 const uploadedAssets = ref<UploadResponse[]>([])
-const selectedTags = ref<string[]>([])
-const tagInput = ref('')
-const quickTags = ref<string[]>([])
-const hashtagRecommendations = ref<PublishTagSuggestion[]>([])
+const selectedTopics = ref<string[]>([])
+const topicInput = ref('')
+const quickTopics = ref<string[]>([])
+const topicRecommendations = ref<PublishTagSuggestion[]>([])
 const activeChannel = ref<PublishChannelKey>(defaultPublishChannelKey)
-const channelExtra = ref<Record<string, unknown>>({})
-const visibility = ref('public')
-let tagSearchTimer: number | undefined
+let topicSearchTimer: number | undefined
 
 const form = reactive({
   title: '',
   content: '',
 })
 
-const publishTypes = [
-  { key: 'text', label: '纯文本', icon: Document },
-  { key: 'image', label: '图文', icon: Picture },
-] satisfies Array<{ key: PublishKind; label: string; icon: typeof Document }>
-
 const drafts = [
   { title: '宿舍桌面改造记录', time: '今天 14:30', status: '编辑中', image: 'https://picsum.photos/seed/draft-dorm/120/90' },
-  { title: 'AI学习流的三步法', time: '今天 10:12', status: '编辑中', image: 'https://picsum.photos/seed/draft-ai/120/90' },
+  { title: 'AI 学习流的三步法', time: '今天 10:12', status: '编辑中', image: 'https://picsum.photos/seed/draft-ai/120/90' },
   { title: '校园晚饭打卡', time: '昨天 22:45', status: '已保存', image: 'https://picsum.photos/seed/draft-campus/120/90' },
 ]
 
 const sampleCoverCards: CoverPreviewCard[] = [
   {
     key: 'sample-1',
-    title: '圣托里尼的日落，永远看不够',
+    title: '圣托里尼的日落，永远看不腻',
     author: '小米在旅行',
     avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=travel',
     cover: 'https://picsum.photos/seed/preview-sunset/500/640',
     content: '',
     current: false,
-    height: '176px',
     likes: 832,
     comments: 56,
-    tag: '#旅行打卡',
+    topic: '#旅行打卡',
   },
   {
     key: 'sample-2',
-    title: '沉浸式肩背训练，今日份挥汗',
+    title: '沉浸式肩背训练，今日份出汗',
     author: '卡卡爱健身',
     avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=fit',
     cover: 'https://picsum.photos/seed/preview-fitness/500/650',
     content: '',
     current: false,
-    height: '186px',
     likes: 921,
     comments: 42,
-    tag: '#健身打卡',
-    duration: '00:15',
+    topic: '#健身打卡',
   },
   {
     key: 'sample-3',
-    title: '周末做的日式豚骨拉面，灵魂是溏心蛋',
-    author: '吃货小圆',
-    avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=food',
-    cover: 'https://picsum.photos/seed/preview-ramen/500/620',
-    content: '',
-    current: false,
-    height: '172px',
-    likes: 489,
-    comments: 16,
-    tag: '#今日美食',
-    duration: '1/6',
-  },
-  {
-    key: 'sample-4',
     title: '今天也是被治愈的一天',
     author: '奶茶不加糖',
     avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=pet',
     cover: 'https://picsum.photos/seed/preview-dog/500/560',
     content: '',
     current: false,
-    height: '154px',
     likes: 643,
     comments: 23,
-    tag: '#日常碎片',
+    topic: '#日常碎片',
   },
 ]
 
@@ -140,127 +113,105 @@ const currentPostType = computed(() => channelConfig[activeChannel.value].postTy
 const currentUserName = computed(() => authStore.currentUser?.nickname || 'Vibelo 用户')
 const currentUserAvatar = computed(() => authStore.currentUser?.avatarUrl || 'https://api.dicebear.com/9.x/adventurer/svg?seed=creator')
 const hasImages = computed(() => uploadedAssets.value.length > 0)
-const currentCover = computed(() => selectedKind.value === 'image' && hasImages.value ? resolveAssetCover(uploadedAssets.value[0]) : '')
+const coverAsset = computed(() => uploadedAssets.value[0] || null)
+const currentCover = computed(() => coverAsset.value ? resolveAssetCover(coverAsset.value) : '')
 const previewParagraphs = computed(() => form.content.split('\n').map((line) => line.trim()).filter(Boolean).slice(0, 5))
-const previewTagList = computed(() => {
-  if (selectedTags.value.length > 0) return selectedTags.value.slice(0, 4).map((item) => `#${item}`)
-  return ['#旅行记录', '#城市漫游']
+const previewTopicList = computed(() => {
+  if (selectedTopics.value.length > 0) return selectedTopics.value.slice(0, 4).map((item) => `#${item}`)
+  return ['#发现灵感', '#校园生活']
 })
-const currentPostTag = computed(() => previewTagList.value[0] || '#发现灵感')
-const normalizedTagKeyword = computed(() => tagInput.value.trim().replace(/^#+/, '').replace(/\s+/g, ''))
-const showHashtagPanel = computed(() => tagInput.value.trim().startsWith('#'))
-const hashtagCandidates = computed(() => {
-  const keyword = normalizedTagKeyword.value
-  if (!keyword) return hashtagRecommendations.value
-  return hashtagRecommendations.value.filter((item) => item.name.includes(keyword))
+const currentPreviewTopic = computed(() => previewTopicList.value[0] || '#发现灵感')
+const normalizedTopicKeyword = computed(() => topicInput.value.trim().replace(/^#+/, '').replace(/\s+/g, ''))
+const showTopicSearchPanel = computed(() => topicInput.value.trim().startsWith('#'))
+const topicCandidates = computed(() => {
+  const keyword = normalizedTopicKeyword.value
+  if (!keyword) return topicRecommendations.value
+  return topicRecommendations.value.filter((item) => item.name.includes(keyword))
 })
+const displayQuickTopics = computed(() => quickTopics.value.slice(0, RECOMMEND_TOPIC_LIMIT))
+const quickTopicOverflow = computed(() => Math.max(0, quickTopics.value.length - RECOMMEND_TOPIC_LIMIT))
+const canPublish = computed(() => !loading.value && !uploading.value)
+
 const coverPreviewCards = computed<CoverPreviewCard[]>(() => [
   {
     key: 'current',
-    title: form.title.trim() || '示例笔记标题',
+    title: form.title.trim() || '无标题分享',
     author: currentUserName.value,
     avatar: currentUserAvatar.value,
     cover: currentCover.value,
-    content: form.content.trim() || '纯文本笔记会以简洁的文字卡片展示在信息流中。',
+    content: form.content.trim() || '内容为空时，这里会显示简短占位文案。',
     current: true,
-    height: currentCover.value ? '176px' : '152px',
     likes: 0,
     comments: 0,
-    tag: currentPostTag.value,
+    topic: currentPreviewTopic.value,
   },
   ...sampleCoverCards,
 ])
-const notePreviewComments = computed(() => [
-  {
-    id: 'c-1',
-    user: '爱吃冰激凌',
-    content: form.title.trim() ? `太赞了！「${form.title.trim().slice(0, 14)}」很想看完整版。` : '太赞了，下次一定要去一次！',
-    likes: 23,
-  },
-  {
-    id: 'c-2',
-    user: '请益焦糖',
-    content: currentCover.value ? '画面很有氛围感，求具体地点。' : '这段文字很有共鸣，收藏了。',
-    likes: 8,
-  },
-])
-const noteRelatedCards = computed(() => coverPreviewCards.value.slice(0, 4))
-const canPublish = computed(() => {
-  if (loading.value || uploading.value) return false
-  if (!form.title.trim() || !form.content.trim()) return false
-  if (selectedKind.value === 'image' && uploadedAssets.value.length === 0) return false
-  return true
-})
 
 onMounted(() => {
   void loadPublishSuggestions()
 })
 
 watch(activeChannel, () => {
-  channelExtra.value = {}
   void loadPublishSuggestions()
 })
 
-watch(normalizedTagKeyword, (keyword) => {
-  if (!showHashtagPanel.value) return
-  if (tagSearchTimer) window.clearTimeout(tagSearchTimer)
-  tagSearchTimer = window.setTimeout(() => {
+watch(normalizedTopicKeyword, (keyword) => {
+  if (!showTopicSearchPanel.value) return
+  if (topicSearchTimer) window.clearTimeout(topicSearchTimer)
+  topicSearchTimer = window.setTimeout(() => {
     void loadPublishSuggestions(keyword)
-  }, 180)
+  }, 200)
 })
 
-watch(showHashtagPanel, (show) => {
-  if (show) void loadPublishSuggestions(normalizedTagKeyword.value)
+watch(showTopicSearchPanel, (show) => {
+  if (show) void loadPublishSuggestions(normalizedTopicKeyword.value)
 })
 
 function resolveAssetCover(asset: UploadResponse) {
   return (asset.thumbUrl || asset.fileUrl).replace('http://localhost:9000', '/minio-img')
 }
 
-function normalizeTag(raw: string) {
+function normalizeTopic(raw: string) {
   return raw.trim().replace(/^#+/, '').replace(/\s+/g, '')
 }
 
 async function loadPublishSuggestions(keyword = '') {
-  tagLoading.value = true
+  topicLoading.value = true
   try {
     const response = await api.publishSuggestions(activeChannel.value, keyword)
-    quickTags.value = response.quickTags || []
-    hashtagRecommendations.value = response.trendingTags || []
+    quickTopics.value = response.quickTags || []
+    topicRecommendations.value = response.trendingTags || []
   } catch {
-    quickTags.value = []
-    hashtagRecommendations.value = []
+    quickTopics.value = []
+    topicRecommendations.value = []
   } finally {
-    tagLoading.value = false
+    topicLoading.value = false
   }
 }
 
-function addTag(raw: string) {
-  const normalized = normalizeTag(raw)
+function addTopic(raw: string) {
+  const normalized = normalizeTopic(raw)
   if (!normalized) return
-  if (selectedTags.value.includes(normalized)) {
-    tagInput.value = ''
+  if (selectedTopics.value.includes(normalized)) {
+    topicInput.value = ''
     return
   }
-  if (selectedTags.value.length >= MAX_TAGS_PER_POST) {
-    ElMessage.info(`最多添加 ${MAX_TAGS_PER_POST} 个标签`)
+  if (selectedTopics.value.length >= MAX_TOPICS_PER_POST) {
+    ElMessage.info(`最多添加 ${MAX_TOPICS_PER_POST} 个话题`)
     return
   }
-  selectedTags.value = [...selectedTags.value, normalized]
-  tagInput.value = ''
+  selectedTopics.value = [...selectedTopics.value, normalized]
+  topicInput.value = ''
 }
 
-function addTagFromInput() {
-  if (!showHashtagPanel.value) return
-  if (!normalizedTagKeyword.value) {
-    ElMessage.info('请输入 #标签 名称')
-    return
-  }
-  addTag(normalizedTagKeyword.value)
+function addTopicFromInput() {
+  if (!showTopicSearchPanel.value || !normalizedTopicKeyword.value) return
+  addTopic(normalizedTopicKeyword.value)
 }
 
-function removeTag(tag: string) {
-  selectedTags.value = selectedTags.value.filter((item) => item !== tag)
+function removeTopic(topic: string) {
+  selectedTopics.value = selectedTopics.value.filter((item) => item !== topic)
 }
 
 function selectPublishChannel(channelKey: PublishChannelKey) {
@@ -274,7 +225,6 @@ async function onSelectFile(uploadFile: { raw?: File }) {
   try {
     const response = await api.uploadImage(uploadFile.raw)
     uploadedAssets.value.push(response)
-    selectedKind.value = 'image'
     previewMode.value = 'cover'
     ElMessage.success('图片上传成功')
   } catch (error) {
@@ -286,10 +236,22 @@ async function onSelectFile(uploadFile: { raw?: File }) {
 
 function removeAsset(index: number) {
   uploadedAssets.value.splice(index, 1)
-  if (uploadedAssets.value.length === 0 && selectedKind.value === 'image') {
-    selectedKind.value = 'text'
-    previewMode.value = 'note'
+}
+
+function setCover(index: number) {
+  if (index <= 0 || index >= uploadedAssets.value.length) return
+  const [asset] = uploadedAssets.value.splice(index, 1)
+  if (!asset) return
+  uploadedAssets.value.unshift(asset)
+  ElMessage.success('已设为封面')
+}
+
+function openCoverEditor() {
+  if (!hasImages.value) {
+    ElMessage.info('请先上传图片')
+    return
   }
+  previewMode.value = 'cover'
 }
 
 function saveDraft() {
@@ -300,11 +262,11 @@ function saveDraft() {
   }, 450)
 }
 
-function uniqueTags(tags: string[]) {
+function uniqueTopics(topics: string[]) {
   const seen = new Set<string>()
   const result: string[] = []
-  for (const item of tags) {
-    const normalized = normalizeTag(item)
+  for (const item of topics) {
+    const normalized = normalizeTopic(item)
     if (!normalized || seen.has(normalized)) continue
     seen.add(normalized)
     result.push(normalized)
@@ -324,77 +286,12 @@ function toAssetsPayload(): CreatePostAssetPayload[] {
   }))
 }
 
-function compactExtraValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    const values = value
-      .map((item) => compactExtraValue(item))
-      .filter((item) => item !== undefined)
-    return values.length > 0 ? values : undefined
-  }
-  if (typeof value === 'string') {
-    const text = value.trim()
-    return text ? text : undefined
-  }
-  if (value === null || value === undefined) return undefined
-  if (typeof value === 'object') {
-    const nested = Object.entries(value as Record<string, unknown>).reduce<Record<string, unknown>>((acc, [key, item]) => {
-      const next = compactExtraValue(item)
-      if (next !== undefined) acc[key] = next
-      return acc
-    }, {})
-    return Object.keys(nested).length > 0 ? nested : undefined
-  }
-  return value
-}
-
-function buildExtraPayload() {
-  const extra = Object.entries(channelExtra.value).reduce<Record<string, unknown>>((acc, [key, value]) => {
-    const next = compactExtraValue(value)
-    if (next !== undefined) acc[key] = next
-    return acc
-  }, {})
-
-  if (activeChannel.value === 'photography') {
-    const exif: Record<string, unknown> = {}
-    for (const key of ['aperture', 'iso', 'shutter']) {
-      if (extra[key] === undefined) continue
-      exif[key] = extra[key]
-      delete extra[key]
-    }
-    if (Object.keys(exif).length > 0) {
-      const existingExif = typeof extra.exif === 'object' && extra.exif !== null && !Array.isArray(extra.exif)
-        ? extra.exif as Record<string, unknown>
-        : {}
-      extra.exif = {
-        ...existingExif,
-        ...exif,
-      }
-    }
-  }
-
-  return extra
-}
-
 async function submit() {
-  if (!form.title.trim()) {
-    ElMessage.warning('请先填写标题')
-    return
-  }
-  if (!form.content.trim()) {
-    ElMessage.warning('请先填写正文')
-    return
-  }
-  if (selectedKind.value === 'image' && uploadedAssets.value.length === 0) {
-    ElMessage.warning('图文模式请先上传图片，或切换为纯文本')
-    return
-  }
-
   loading.value = true
   try {
-    const finalTags = uniqueTags(selectedTags.value).slice(0, MAX_TAGS_PER_POST)
-    const assets = selectedKind.value === 'image' ? toAssetsPayload() : []
+    const finalTopics = uniqueTopics(selectedTopics.value).slice(0, MAX_TOPICS_PER_POST)
+    const assets = toAssetsPayload()
     const imageUrls = assets.map((asset) => asset.fileUrl).filter(Boolean)
-    const extra = buildExtraPayload()
     const payload: {
       title: string
       content: string
@@ -402,7 +299,6 @@ async function submit() {
       channelCode: string
       postType: string
       imageUrls?: string[]
-      extra?: Record<string, unknown>
       tags?: string[]
       assets?: CreatePostAssetPayload[]
     } = {
@@ -411,10 +307,9 @@ async function submit() {
       channel: activeChannel.value,
       channelCode: activeChannel.value,
       postType: currentPostType.value,
-      ...(finalTags.length > 0 ? { tags: finalTags } : {}),
+      ...(finalTopics.length > 0 ? { tags: finalTopics } : {}),
       ...(assets.length > 0 ? { assets } : {}),
       ...(imageUrls.length > 0 ? { imageUrls } : {}),
-      ...(Object.keys(extra).length > 0 ? { extra } : {}),
     }
 
     await api.createPost(payload)
@@ -432,20 +327,6 @@ async function submit() {
 <template>
   <div class="publish-studio">
     <aside class="publish-studio__left">
-      <section class="publish-studio__side-card publish-studio__type-card">
-        <h2>发布内容</h2>
-        <button
-          v-for="item in publishTypes"
-          :key="item.key"
-          type="button"
-          :class="{ 'is-active': selectedKind === item.key }"
-          @click="selectedKind = item.key"
-        >
-          <el-icon><component :is="item.icon" /></el-icon>
-          <span>{{ item.label }}</span>
-        </button>
-      </section>
-
       <section class="publish-studio__side-card publish-studio__draft-card">
         <div class="publish-studio__side-title">
           <strong>草稿箱 <em>(3)</em></strong>
@@ -477,54 +358,87 @@ async function submit() {
           <button type="button" @click="router.back()">
             <el-icon><ArrowLeft /></el-icon>
           </button>
-          <h1>{{ selectedKind === 'image' ? '新建图文' : '新建纯文本' }}</h1>
+          <h1>新建发布</h1>
           <span>
             <el-icon><Check /></el-icon>
             已保存
           </span>
         </div>
 
-        <label class="publish-studio__title-field">
-          <input v-model="form.title" maxlength="100" placeholder="填写一个清晰具体的标题" />
-          <span>{{ titleCount }}/100</span>
-        </label>
+        <section class="publish-studio__compose-panel">
+          <h3>基础信息</h3>
 
-        <section class="publish-studio__text-editor">
-          <textarea v-model="form.content" maxlength="1024" placeholder="输入正文描述，分享有价值的信息或观点" />
-          <span>{{ contentCount }}/1024</span>
-        </section>
+          <div class="publish-studio__compose-row publish-studio__compose-row--description">
+            <div class="publish-studio__compose-label">
+              <strong>作品描述</strong>
+              <span>?</span>
+            </div>
+            <div class="publish-studio__description-card">
+              <div class="publish-studio__title-line">
+                <input v-model="form.title" :maxlength="TITLE_LIMIT" placeholder="添加作品标题" />
+                <span>{{ titleCount }}/{{ TITLE_LIMIT }}</span>
+              </div>
 
-        <section class="publish-studio__setting">
-          <div class="publish-studio__section-head">
-            <h3>图片</h3>
-            <small>纯文本可不上传，图文模式至少上传 1 张</small>
+              <div v-if="selectedTopics.length > 0" class="publish-studio__selected-topics">
+                <span v-for="topic in selectedTopics" :key="topic">
+                  #{{ topic }}
+                  <button type="button" @click="removeTopic(topic)">×</button>
+                </span>
+              </div>
+
+              <textarea
+                v-model="form.content"
+                :maxlength="CONTENT_LIMIT"
+                placeholder="分享你的校园生活、作品灵感或想法"
+              />
+
+              <div class="publish-studio__description-actions">
+                <div class="publish-studio__topic-entry">
+                  <input
+                    v-model="topicInput"
+                    maxlength="24"
+                    placeholder="#添加话题"
+                    @keydown.enter.prevent="addTopicFromInput"
+                  />
+                  <button
+                    type="button"
+                    class="publish-studio__topic-add"
+                    :disabled="!showTopicSearchPanel || !normalizedTopicKeyword"
+                    @click="addTopic(normalizedTopicKeyword)"
+                  >
+                    添加
+                  </button>
+                  <button type="button" class="publish-studio__mention-btn">@好友</button>
+                </div>
+                <span>{{ contentCount }} / {{ CONTENT_LIMIT }}</span>
+              </div>
+
+              <div v-if="showTopicSearchPanel" class="publish-studio__topic-search-list">
+                <button v-for="item in topicCandidates" :key="item.name" type="button" @click="addTopic(item.name)">
+                  <strong>#{{ item.name }}</strong>
+                  <small>{{ item.heat }}</small>
+                </button>
+                <p v-if="topicLoading">正在加载话题...</p>
+                <p v-else-if="topicCandidates.length === 0">没有匹配话题</p>
+              </div>
+
+              <div v-else class="publish-studio__topic-recommend">
+                <span>推荐</span>
+                <div>
+                  <button v-for="topic in displayQuickTopics" :key="topic" type="button" @click="addTopic(topic)">
+                    #{{ topic }}
+                  </button>
+                  <button v-if="quickTopicOverflow > 0" type="button" class="publish-studio__topic-more">+{{ quickTopicOverflow }}</button>
+                  <small v-if="topicLoading">加载中...</small>
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="publish-studio__covers">
-            <article v-for="(asset, index) in uploadedAssets" :key="asset.objectKey" class="publish-studio__asset">
-              <img :src="resolveAssetCover(asset)" alt="" />
-              <button type="button" aria-label="移除图片" @click="removeAsset(index)">
-                <el-icon><Close /></el-icon>
-              </button>
-            </article>
-            <el-upload
-              :auto-upload="false"
-              :show-file-list="false"
-              accept="image/*"
-              multiple
-              :disabled="uploading"
-              :on-change="onSelectFile"
-            >
-              <button type="button" class="publish-studio__upload">
-                <el-icon><UploadFilled /></el-icon>
-                {{ uploading ? '上传中...' : '上传图片' }}
-              </button>
-            </el-upload>
-          </div>
-        </section>
 
-        <section class="publish-studio__form-stack">
-          <div class="publish-studio__row publish-studio__row--top">
-            <strong>频道</strong>
+          <div class="publish-studio__compose-row publish-studio__compose-row--channel">
+            <div class="publish-studio__compose-label">
+              <strong>发布频道</strong>
+            </div>
             <div class="publish-studio__channel-tabs">
               <button
                 v-for="channel in publishChannels"
@@ -538,76 +452,79 @@ async function submit() {
             </div>
           </div>
 
-          <div class="publish-studio__row publish-studio__row--top">
-            <strong>扩展信息</strong>
-            <PublishFormRenderer v-model="channelExtra" :channel-code="activeChannel" />
-          </div>
-
-          <div class="publish-studio__row publish-studio__row--top">
-            <strong>标签</strong>
-            <div class="publish-studio__tag-panel">
-              <div v-if="selectedTags.length > 0" class="publish-studio__selected-tags">
-                <span v-for="tag in selectedTags" :key="tag">
-                  #{{ tag }}
-                  <button type="button" @click="removeTag(tag)">×</button>
-                </span>
-              </div>
-
-              <div class="publish-studio__tag-entry">
-                <input
-                  v-model="tagInput"
-                  maxlength="24"
-                  placeholder="输入 # 获取热门话题，不输入 # 可直接点下方标签"
-                  @keydown.enter.prevent="addTagFromInput"
-                />
-                <button
-                  v-if="showHashtagPanel && normalizedTagKeyword"
-                  type="button"
-                  class="publish-studio__tag-add"
-                  @click="addTag(normalizedTagKeyword)"
-                >
-                  添加
+          <div class="publish-studio__compose-row">
+            <div class="publish-studio__compose-label">
+              <strong>封面设置</strong>
+            </div>
+            <div>
+              <div class="publish-studio__cover-box">
+                <div class="publish-studio__cover-main">
+                  <img v-if="coverAsset" :src="resolveAssetCover(coverAsset)" alt="" />
+                  <div v-else class="publish-studio__cover-placeholder" />
+                  <strong>{{ coverAsset ? '已选择封面' : '选择一张图片作为封面' }}</strong>
+                </div>
+                <button type="button" :disabled="!hasImages" @click="openCoverEditor">
+                  <el-icon><Edit /></el-icon>
+                  编辑封面
                 </button>
               </div>
-
-              <div v-if="showHashtagPanel" class="publish-studio__hashtag-list">
-                <button v-for="item in hashtagCandidates" :key="item.name" type="button" @click="addTag(item.name)">
-                  <strong>#{{ item.name }}</strong>
-                  <small>{{ item.heat }}</small>
-                </button>
-                <p v-if="tagLoading">正在加载话题...</p>
-                <p v-else-if="hashtagCandidates.length === 0">没有匹配到话题</p>
-              </div>
-
-              <div v-else class="publish-studio__quick-tags">
-                <button v-for="tag in quickTags" :key="tag" type="button" @click="addTag(tag)">
-                  #{{ tag }}
-                </button>
-                <span v-if="tagLoading">正在加载标签...</span>
-              </div>
+              <p class="publish-studio__setting-tip">提示：优质封面会提升内容曝光表现</p>
             </div>
           </div>
 
-          <div class="publish-studio__row">
-            <strong>可见范围</strong>
-            <el-select v-model="visibility" class="publish-studio__select">
-              <el-option label="公开 - 所有人可见" value="public" />
-              <el-option label="仅关注者可见" value="follower" />
-              <el-option label="仅自己可见" value="private" />
-            </el-select>
-          </div>
+          <div class="publish-studio__compose-row publish-studio__compose-row--media">
+            <div class="publish-studio__compose-label">
+              <strong>编辑图片</strong>
+            </div>
+            <div>
+              <div class="publish-studio__covers">
+                <article v-for="(asset, index) in uploadedAssets" :key="asset.objectKey" class="publish-studio__asset">
+                  <img :src="resolveAssetCover(asset)" alt="" />
+                  <button type="button" aria-label="移除图片" @click="removeAsset(index)">
+                    <el-icon><Close /></el-icon>
+                  </button>
+                  <button
+                    v-if="index > 0"
+                    type="button"
+                    class="publish-studio__set-cover"
+                    @click="setCover(index)"
+                  >
+                    设为封面
+                  </button>
+                </article>
 
-          <div class="publish-studio__row publish-studio__publish-time">
-            <strong>发布时间</strong>
-            <label>
-              <input type="radio" checked />
-              立即发布
-            </label>
-            <label class="is-disabled" title="定时发布暂未开放">
-              <input type="radio" disabled />
-              定时发布
-            </label>
-            <input type="text" disabled value="暂未开放" />
+                <el-upload
+                  v-if="uploadedAssets.length === 0"
+                  :auto-upload="false"
+                  :show-file-list="false"
+                  accept="image/*"
+                  multiple
+                  :disabled="uploading"
+                  :on-change="onSelectFile"
+                >
+                  <button type="button" class="publish-studio__empty-upload">
+                    <el-icon><UploadFilled /></el-icon>
+                    上传图片
+                  </button>
+                </el-upload>
+              </div>
+              <div class="publish-studio__asset-footer">
+                <strong>已添加 {{ uploadedAssets.length }} 张图片</strong>
+                <el-upload
+                  :auto-upload="false"
+                  :show-file-list="false"
+                  accept="image/*"
+                  multiple
+                  :disabled="uploading"
+                  :on-change="onSelectFile"
+                >
+                  <button type="button" class="publish-studio__upload">
+                    <el-icon><UploadFilled /></el-icon>
+                    {{ uploading ? '上传中...' : '继续添加' }}
+                  </button>
+                </el-upload>
+              </div>
+            </div>
           </div>
         </section>
       </section>
@@ -630,7 +547,7 @@ async function submit() {
           <button type="button" :class="{ 'is-active': previewMode === 'cover' }" @click="previewMode = 'cover'">封面预览</button>
         </div>
 
-        <div class="publish-phone" :class="{ 'is-cover-mode': previewMode === 'cover' }">
+        <div class="publish-phone">
           <div class="publish-phone__status">
             <strong>9:41</strong>
             <span><i /> <i /> <b /></span>
@@ -638,114 +555,35 @@ async function submit() {
 
           <template v-if="previewMode === 'note'">
             <div class="publish-phone__note-shell">
-              <header class="publish-phone__note-topbar">
-                <button type="button">‹</button>
-                <strong>Vibelo</strong>
-                <span>
-                  <button type="button">⤴</button>
-                  <button type="button">⋯</button>
-                </span>
-              </header>
-
               <section class="publish-phone__note-scroll">
                 <article class="publish-phone__note-article">
                   <div v-if="currentCover" class="publish-phone__note-hero-wrap">
                     <img class="publish-phone__note-hero" :src="currentCover" alt="" />
-                    <em class="publish-phone__note-index">1/{{ Math.max(1, uploadedAssets.length) }}</em>
                   </div>
 
                   <div class="publish-phone__note-author">
                     <img :src="currentUserAvatar" alt="" />
                     <span>
                       <strong>{{ currentUserName }}</strong>
-                      <small>{{ currentChannelLabel }} · 摄影博主</small>
+                      <small>{{ currentChannelLabel }}</small>
                     </span>
-                    <button type="button">关注</button>
                   </div>
 
-                  <section class="publish-phone__note-copy" :class="{ 'is-text-only': !currentCover }">
-                    <h3>{{ form.title || '填写标题后在这里预览' }}</h3>
-                    <p v-if="previewParagraphs.length === 0">输入正文后，详情页会按移动端样式展示。</p>
+                  <section class="publish-phone__note-copy">
+                    <h3>{{ form.title || '无标题分享' }}</h3>
+                    <p v-if="previewParagraphs.length === 0">正文为空时，发布后也支持展示。</p>
                     <p v-for="line in previewParagraphs" :key="line">{{ line }}</p>
                     <div class="publish-phone__note-topics">
-                      <span v-for="tag in previewTagList" :key="tag">{{ tag }}</span>
+                      <span v-for="topic in previewTopicList" :key="topic">{{ topic }}</span>
                     </div>
                   </section>
-
-                  <footer class="publish-phone__note-metrics">
-                    <span>❤ 832</span>
-                    <span>💬 56</span>
-                    <span>⤴ 128</span>
-                    <span>☆ 收藏</span>
-                  </footer>
-                  <p class="publish-phone__note-meta">发布于 05-12 18:42 · {{ currentPostTag }}</p>
                 </article>
-
-                <section class="publish-phone__note-comments">
-                  <header>
-                    <strong>评论 56</strong>
-                    <span>查看全部 ›</span>
-                  </header>
-                  <article v-for="comment in notePreviewComments" :key="comment.id">
-                    <img :src="`https://api.dicebear.com/9.x/adventurer/svg?seed=${comment.id}`" alt="" />
-                    <span>
-                      <strong>{{ comment.user }}</strong>
-                      <p>{{ comment.content }}</p>
-                    </span>
-                    <em>{{ comment.likes }}</em>
-                  </article>
-                  <div class="publish-phone__note-comment-input">说点什么...</div>
-                </section>
-
-                <section class="publish-phone__note-related">
-                  <h4>相似内容</h4>
-                  <div class="publish-phone__note-related-grid">
-                    <article v-for="card in noteRelatedCards" :key="`related-${card.key}`" :class="{ 'is-text': !card.cover }">
-                      <img v-if="card.cover" :src="card.cover" alt="" />
-                      <div v-else class="publish-phone__note-related-text">{{ card.content }}</div>
-                      <p>{{ card.title }}</p>
-                      <footer>
-                        <span>{{ card.author }}</span>
-                        <em>♡ {{ card.likes }}</em>
-                      </footer>
-                    </article>
-                  </div>
-                </section>
               </section>
-
-              <footer class="publish-phone__note-bottom">
-                <button type="button">
-                  <img :src="currentUserAvatar" alt="" />
-                  <span>{{ currentUserName }}</span>
-                  <strong>关注</strong>
-                </button>
-                <div>
-                  <span>❤ 832</span>
-                  <span>💬 56</span>
-                  <span>⤴ 128</span>
-                  <span>☆</span>
-                </div>
-              </footer>
             </div>
           </template>
 
           <template v-else>
             <div class="publish-phone__feed-shell">
-              <header class="publish-phone__feed-topbar">
-                <strong>Vibelo</strong>
-                <div>搜索用户、内容、话题</div>
-                <span><i>8</i><i>12</i></span>
-              </header>
-
-              <div class="publish-phone__feed-filters">
-                <strong>推荐</strong>
-                <span>关注</span>
-                <span>视频</span>
-                <span>图文</span>
-                <span>热门</span>
-                <span>同城</span>
-              </div>
-
               <section class="publish-phone__feed-waterfall">
                 <article
                   v-for="card in coverPreviewCards"
@@ -753,10 +591,9 @@ async function submit() {
                   class="publish-phone__feed-card"
                   :class="{ 'is-current': card.current, 'is-text': !card.cover }"
                 >
-                  <div class="publish-phone__feed-media" :style="card.cover ? { minHeight: card.height } : undefined">
+                  <div class="publish-phone__feed-media">
                     <img v-if="card.cover" :src="card.cover" alt="" />
                     <div v-else class="publish-phone__feed-text">{{ card.content }}</div>
-                    <small v-if="card.duration">{{ card.duration }}</small>
                   </div>
                   <div class="publish-phone__feed-meta">
                     <div class="publish-phone__feed-user">
@@ -764,22 +601,14 @@ async function submit() {
                       <span>{{ card.author }}</span>
                     </div>
                     <h4 v-if="card.cover">{{ card.title }}</h4>
-                    <p>{{ card.tag }}</p>
+                    <p>{{ card.topic }}</p>
                     <footer>
-                      <span>♡ {{ card.likes }}</span>
-                      <span>💬 {{ card.comments }}</span>
+                      <span>赞 {{ card.likes }}</span>
+                      <span>评 {{ card.comments }}</span>
                     </footer>
                   </div>
                 </article>
               </section>
-
-              <footer class="publish-phone__tabbar">
-                <strong>首页</strong>
-                <span>发现</span>
-                <b>+</b>
-                <span>消息</span>
-                <span>我的</span>
-              </footer>
             </div>
           </template>
         </div>
@@ -815,7 +644,7 @@ async function submit() {
 
 .publish-studio__left {
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: 12px;
 }
 
@@ -839,45 +668,11 @@ async function submit() {
   box-shadow: 0 12px 28px rgba(32, 36, 47, 0.05);
 }
 
-.publish-studio__type-card {
-  padding: 18px 14px 20px;
-}
-
-.publish-studio__type-card h2 {
-  margin: 0 0 16px;
-  color: #151b27;
-  font-size: 18px;
-  font-weight: 820;
-}
-
-.publish-studio__type-card button {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  height: 44px;
-  padding: 0 14px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: #3c4350;
-  cursor: pointer;
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.publish-studio__type-card button.is-active,
-.publish-studio__type-card button:hover {
-  background: #fff0ed;
-  color: #ff5a45;
-}
-
 .publish-studio__draft-card {
   padding: 14px;
 }
 
-.publish-studio__side-title,
-.publish-studio__section-head {
+.publish-studio__side-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1014,80 +809,354 @@ async function submit() {
   font-size: 12px;
 }
 
-.publish-studio__title-field {
+.publish-studio__compose-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.publish-studio__compose-panel h3 {
+  margin: 0;
+  color: #151b27;
+  font-size: 19px;
+  font-weight: 820;
+}
+
+.publish-studio__compose-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.publish-studio__compose-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 34px;
+  color: #222a37;
+}
+
+.publish-studio__compose-label strong {
+  font-size: 15px;
+  font-weight: 820;
+}
+
+.publish-studio__compose-label span {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #d8dde6;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 760;
+}
+
+.publish-studio__description-card {
+  overflow: hidden;
+  border: 1px solid #e7ebf2;
+  border-radius: 8px;
+  background: #fafbfc;
+}
+
+.publish-studio__title-line {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  height: 58px;
-  padding: 0 16px;
-  border: 1px solid #eceff4;
-  border-radius: 8px;
-  background: #fff;
+  height: 38px;
+  margin: 0 14px;
+  border-bottom: 1px solid #e1e5ec;
 }
 
-.publish-studio__title-field input {
+.publish-studio__title-line input {
   min-width: 0;
   border: none;
   outline: none;
-  color: #151b27;
-  font-size: 22px;
-  font-weight: 820;
+  background: transparent;
+  color: #1f2733;
+  font-size: 14px;
 }
 
-.publish-studio__title-field span,
-.publish-studio__text-editor > span,
-.publish-studio__section-head small {
-  color: #9aa1ad;
+.publish-studio__title-line span,
+.publish-studio__description-actions > span {
+  color: #818a99;
   font-size: 12px;
 }
 
-.publish-studio__text-editor {
-  position: relative;
-  margin-top: 10px;
-  border: 1px solid #eceff4;
-  border-radius: 8px;
-  overflow: hidden;
+.publish-studio__selected-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 28px;
+  padding: 9px 14px 0;
 }
 
-.publish-studio__text-editor textarea {
+.publish-studio__selected-topics span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: #eaf2ff;
+  color: #2f5ea8;
+  font-size: 13px;
+}
+
+.publish-studio__selected-topics button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.publish-studio__description-card textarea {
+  display: block;
   width: 100%;
-  min-height: 220px;
-  padding: 18px 16px 38px;
+  min-height: 118px;
+  padding: 12px 14px 8px;
   border: none;
   outline: none;
   resize: vertical;
-  color: #2d3440;
-  font-size: 15px;
-  line-height: 1.75;
+  background: transparent;
+  color: #2b3444;
+  font-size: 14px;
+  line-height: 1.7;
 }
 
-.publish-studio__text-editor > span {
-  position: absolute;
-  right: 14px;
-  bottom: 10px;
+.publish-studio__description-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 14px 10px;
 }
 
-.publish-studio__setting {
-  margin-top: 18px;
+.publish-studio__topic-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.publish-studio__setting h3,
-.publish-studio__section-head h3 {
-  margin: 0 0 12px;
-  font-size: 15px;
-  font-weight: 820;
+.publish-studio__topic-entry input {
+  width: 132px;
+  height: 30px;
+  padding: 0 9px;
+  border: none;
+  border-radius: 6px;
+  outline: none;
+  background: transparent;
+  color: #596477;
+}
+
+.publish-studio__topic-entry input:focus {
+  background: #fff;
+  box-shadow: inset 0 0 0 1px #c9d7f5;
+}
+
+.publish-studio__topic-add,
+.publish-studio__mention-btn {
+  height: 30px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #596477;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.publish-studio__topic-add:disabled {
+  color: #a1a9b6;
+  cursor: not-allowed;
+}
+
+.publish-studio__topic-search-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0 14px 12px;
+  padding: 8px;
+  border-top: 1px solid #e5e9f1;
+  background: #fff;
+}
+
+.publish-studio__topic-search-list button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid #e7ebf2;
+  border-radius: 6px;
+  background: #fafbfc;
+  cursor: pointer;
+}
+
+.publish-studio__topic-search-list strong {
+  color: #2b3444;
+  font-size: 13px;
+}
+
+.publish-studio__topic-search-list small,
+.publish-studio__topic-search-list p {
+  color: #8f96a4;
+  font-size: 12px;
+}
+
+.publish-studio__topic-search-list p {
+  grid-column: 1 / -1;
+  margin: 6px 2px;
+}
+
+.publish-studio__topic-recommend {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 9px 14px 10px;
+  border-top: 1px solid #e1e5ec;
+  background: #fff;
+}
+
+.publish-studio__topic-recommend > span {
+  color: #7a8494;
+  font-size: 13px;
+  line-height: 26px;
+}
+
+.publish-studio__topic-recommend > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.publish-studio__topic-recommend button {
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid #e4e8ef;
+  border-radius: 5px;
+  background: #fff;
+  color: #4a5568;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.publish-studio__topic-recommend .publish-studio__topic-more {
+  border-color: #e7ebf2;
+  background: #f2f5f9;
+  color: #506074;
+  font-weight: 760;
+}
+
+.publish-studio__topic-recommend small {
+  align-self: center;
+  color: #a0a7b3;
+  font-size: 12px;
+}
+
+.publish-studio__channel-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.publish-studio__channel-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 104px;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid #e7ebf2;
+  border-radius: 8px;
+  background: #fbfcfe;
+  color: #4e5665;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.publish-studio__channel-tabs button.is-selected {
+  border-color: #ffd4cc;
+  background: #fff0ed;
+  color: #ff5a45;
+  font-weight: 760;
+}
+
+.publish-studio__cover-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 64px;
+  padding: 8px 12px;
+  border: 1px solid #e7ebf2;
+  border-radius: 8px;
+  background: #f7f8fa;
+}
+
+.publish-studio__cover-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.publish-studio__cover-main img,
+.publish-studio__cover-placeholder {
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: linear-gradient(135deg, #eef1f5, #dfe5ef);
+}
+
+.publish-studio__cover-main strong {
+  color: #2a3444;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.publish-studio__cover-box > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 34px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #4f5a6d;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.publish-studio__cover-box > button:disabled {
+  color: #a3acba;
+  background: #f6f8fa;
+  cursor: not-allowed;
+}
+
+.publish-studio__setting-tip {
+  margin: 8px 0 0;
+  color: #8892a1;
+  font-size: 13px;
 }
 
 .publish-studio__covers {
   display: grid;
-  grid-template-columns: repeat(5, minmax(88px, 1fr)) 112px;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 104px));
   gap: 10px;
 }
 
 .publish-studio__asset {
   position: relative;
   overflow: hidden;
-  min-height: 84px;
+  width: 84px;
+  aspect-ratio: 3 / 4;
   border: 1px solid #e8ebf0;
   border-radius: 8px;
   background: #f1f3f7;
@@ -1100,7 +1169,7 @@ async function submit() {
   object-fit: cover;
 }
 
-.publish-studio__asset button {
+.publish-studio__asset > button:first-of-type {
   position: absolute;
   right: 6px;
   top: 6px;
@@ -1110,226 +1179,59 @@ async function submit() {
   height: 24px;
   border: none;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.92);
   color: #3c4350;
   cursor: pointer;
 }
 
-.publish-studio__upload {
-  display: grid !important;
-  place-items: center;
-  gap: 5px;
-  width: 112px;
-  height: 84px;
-  border: 1px dashed #d8dde6 !important;
-  border-radius: 8px;
-  background: #fff !important;
-  color: #535c6b;
-  cursor: pointer;
-}
-
-.publish-studio__upload .el-icon {
-  font-size: 24px;
-}
-
-.publish-studio__form-stack {
-  display: grid;
-  gap: 16px;
-  margin-top: 18px;
-}
-
-.publish-studio__row {
-  display: grid;
-  grid-template-columns: 82px minmax(0, 1fr);
-  align-items: center;
-  gap: 12px;
-}
-
-.publish-studio__row--top {
-  align-items: start;
-}
-
-.publish-studio__row > strong {
-  color: #242b38;
-  font-size: 15px;
-  font-weight: 820;
-}
-
-.publish-studio__channel-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.publish-studio__channel-tabs button {
-  display: inline-flex;
-  align-items: center;
-  height: 32px;
-  padding: 0 12px;
-  border: 1px solid #e8ebf0;
-  border-radius: 999px;
-  background: #fff;
-  color: #4e5665;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.publish-studio__channel-tabs button.is-selected {
-  border-color: #ffd4cc;
-  background: #fff0ed;
-  color: #ff5a45;
-}
-
-.publish-studio__tag-panel {
-  display: grid;
-  gap: 10px;
-}
-
-.publish-studio__selected-tags,
-.publish-studio__quick-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.publish-studio__selected-tags span,
-.publish-studio__quick-tags button {
-  display: inline-flex;
-  align-items: center;
-  height: 32px;
-  padding: 0 10px;
-  border: 1px solid #d4e4ff;
-  border-radius: 999px;
-  background: #edf4ff;
-  color: #3e6ad6;
-  font-size: 13px;
-}
-
-.publish-studio__selected-tags span {
-  gap: 6px;
-}
-
-.publish-studio__selected-tags button {
-  border: none;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
-
-.publish-studio__quick-tags button {
-  background: #f6faff;
-  cursor: pointer;
-}
-
-.publish-studio__quick-tags span {
-  color: #9aa1ad;
-  font-size: 13px;
-}
-
-.publish-studio__tag-entry {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.publish-studio__tag-entry input {
-  width: 100%;
-  height: 34px;
-  padding: 0 12px;
-  border: 1px solid #e8ebf0;
-  border-radius: 8px;
-  outline: none;
-}
-
-.publish-studio__tag-entry input:focus {
-  border-color: #a9c3ff;
-}
-
-.publish-studio__tag-add {
-  height: 34px;
-  padding: 0 12px;
-  border: none;
-  border-radius: 8px;
-  background: #edf4ff;
-  color: #3e6ad6;
-  cursor: pointer;
-}
-
-.publish-studio__hashtag-list {
-  display: grid;
-  gap: 2px;
-  max-height: 256px;
-  padding: 8px;
-  border: 1px solid #e8ebf0;
-  border-radius: 8px;
-  overflow-y: auto;
-  background: #fff;
-}
-
-.publish-studio__hashtag-list button {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  min-height: 36px;
+.publish-studio__set-cover {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  height: 24px;
   padding: 0 8px;
   border: none;
-  border-radius: 6px;
-  background: transparent;
+  border-radius: 999px;
+  background: rgba(32, 36, 47, 0.72);
+  color: #fff;
   cursor: pointer;
-  text-align: left;
-}
-
-.publish-studio__hashtag-list button:hover {
-  background: #f5f8ff;
-}
-
-.publish-studio__hashtag-list strong {
-  color: #253247;
-  font-size: 14px;
-  font-weight: 650;
-}
-
-.publish-studio__hashtag-list small,
-.publish-studio__hashtag-list p {
-  color: #8a91a0;
   font-size: 12px;
 }
 
-.publish-studio__hashtag-list p {
-  margin: 8px;
-}
-
-.publish-studio__select {
-  width: 230px;
-}
-
-.publish-studio__publish-time {
-  grid-template-columns: 82px auto auto 160px;
-}
-
-.publish-studio__publish-time label {
-  display: inline-flex;
+.publish-studio__asset-footer {
+  display: flex;
+  justify-content: flex-start;
   align-items: center;
-  gap: 7px;
-  color: #4e5665;
-  font-size: 14px;
+  gap: 12px;
+  margin-top: 10px;
 }
 
-.publish-studio__publish-time label.is-disabled {
-  color: #a7aeba;
+.publish-studio__asset-footer strong {
+  color: #5d6675;
+  font-size: 13px;
+  font-weight: 500;
 }
 
-.publish-studio__publish-time input[type='text'] {
+.publish-studio__upload,
+.publish-studio__empty-upload {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   height: 34px;
   padding: 0 12px;
-  border: 1px solid #e8ebf0;
+  border: 1px solid #eceff4 !important;
   border-radius: 8px;
-  outline: none;
+  background: #f4f6f9 !important;
+  color: #4c5870;
+  cursor: pointer;
 }
 
-.publish-studio__publish-time input[type='radio'] {
-  accent-color: #ff5a45;
+.publish-studio__empty-upload {
+  width: 84px;
+  height: 112px;
+  flex-direction: column;
+  border-style: dashed !important;
 }
 
 .publish-studio__bottom-bar {
@@ -1340,6 +1242,7 @@ async function submit() {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  margin-top: 12px;
   padding: 16px 18px;
   border-top-left-radius: 0;
   border-top-right-radius: 0;
@@ -1459,51 +1362,13 @@ async function submit() {
   height: calc(100% - 42px);
 }
 
-.publish-phone__note-shell {
-  grid-template-rows: auto minmax(0, 1fr) auto;
-}
-
-.publish-phone__note-topbar {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 0 12px;
-  height: 42px;
-  border-bottom: 1px solid #f0f2f5;
-}
-
-.publish-phone__note-topbar button {
-  border: none;
-  background: transparent;
-  color: #1d2633;
-  cursor: pointer;
-  font-size: 20px;
-}
-
-.publish-phone__note-topbar > strong {
-  color: #20242f;
-  font-size: 17px;
-  font-weight: 800;
-}
-
-.publish-phone__note-topbar > span {
-  display: inline-flex;
-  gap: 8px;
-}
-
 .publish-phone__note-scroll {
   overflow-y: auto;
-  padding-bottom: 10px;
   background: #fcfcfd;
 }
 
 .publish-phone__note-article {
   background: #fff;
-}
-
-.publish-phone__note-hero-wrap {
-  position: relative;
 }
 
 .publish-phone__note-hero {
@@ -1513,23 +1378,9 @@ async function submit() {
   object-fit: cover;
 }
 
-.publish-phone__note-index {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  height: 22px;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: rgba(19, 24, 33, 0.65);
-  color: #fff;
-  font-size: 11px;
-  font-style: normal;
-  line-height: 22px;
-}
-
 .publish-phone__note-author {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 56px;
+  grid-template-columns: 34px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   padding: 10px 12px 8px;
@@ -1565,29 +1416,14 @@ async function submit() {
   white-space: nowrap;
 }
 
-.publish-phone__note-author button {
-  height: 24px;
-  border: 1px solid #ff4966;
-  border-radius: 999px;
-  background: #fff;
-  color: #ff3a5b;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
-}
-
 .publish-phone__note-copy {
-  padding: 0 12px 8px;
-}
-
-.publish-phone__note-copy.is-text-only {
-  margin-top: 6px;
+  padding: 0 12px 12px;
 }
 
 .publish-phone__note-copy h3 {
   margin: 0 0 8px;
   color: #20242f;
-  font-size: 22px;
+  font-size: 20px;
   line-height: 1.32;
 }
 
@@ -1610,288 +1446,11 @@ async function submit() {
   font-size: 12px;
 }
 
-.publish-phone__note-metrics {
-  display: flex;
-  gap: 18px;
-  padding: 0 12px;
-  color: #6d7380;
-  font-size: 12px;
-}
-
-.publish-phone__note-meta {
-  margin: 7px 0 0;
-  padding: 0 12px 10px;
-  border-bottom: 1px solid #f0f2f5;
-  color: #a0a7b3;
-  font-size: 11px;
-}
-
-.publish-phone__note-comments {
-  margin-top: 8px;
-  padding: 10px 12px;
-  background: #fff;
-}
-
-.publish-phone__note-comments > header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-}
-
-.publish-phone__note-comments > header strong {
-  color: #1d2431;
-  font-size: 13px;
-}
-
-.publish-phone__note-comments > header span {
-  color: #939aa8;
-  font-size: 11px;
-}
-
-.publish-phone__note-comments article {
-  display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.publish-phone__note-comments article img {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-}
-
-.publish-phone__note-comments article span {
-  min-width: 0;
-}
-
-.publish-phone__note-comments article strong {
-  display: block;
-  color: #2d3441;
-  font-size: 12px;
-}
-
-.publish-phone__note-comments article p {
-  margin: 2px 0 0;
-  color: #5a6271;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.publish-phone__note-comments article em {
-  color: #8f96a4;
-  font-size: 11px;
-  font-style: normal;
-}
-
-.publish-phone__note-comment-input {
-  height: 30px;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: #f5f6f8;
-  color: #a4acb8;
-  font-size: 12px;
-  line-height: 30px;
-}
-
-.publish-phone__note-related {
-  margin-top: 8px;
-  padding: 10px 12px 14px;
-  background: #fff;
-}
-
-.publish-phone__note-related h4 {
-  margin: 0 0 9px;
-  color: #1f2733;
-  font-size: 13px;
-}
-
-.publish-phone__note-related-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.publish-phone__note-related-grid article {
-  overflow: hidden;
-  border-radius: 8px;
-  background: #fff;
-  border: 1px solid #eceff3;
-}
-
-.publish-phone__note-related-grid img {
-  width: 100%;
-  height: 94px;
-  object-fit: cover;
-}
-
-.publish-phone__note-related-grid .is-text .publish-phone__note-related-text {
-  height: 94px;
-  padding: 9px;
-  background: #f5f7fb;
-  color: #4d5562;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.publish-phone__note-related-grid p {
-  display: -webkit-box;
-  margin: 6px 8px 4px;
-  overflow: hidden;
-  color: #252c38;
-  font-size: 12px;
-  line-height: 1.4;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.publish-phone__note-related-grid footer {
-  display: flex;
-  justify-content: space-between;
-  margin: 0 8px 8px;
-  color: #8f97a5;
-  font-size: 11px;
-}
-
-.publish-phone__note-related-grid em {
-  font-style: normal;
-}
-
-.publish-phone__note-bottom {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  height: 56px;
-  padding: 0 12px;
-  border-top: 1px solid #eceff3;
-  background: #fff;
-}
-
-.publish-phone__note-bottom > button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 10px 0 4px;
-  border: none;
-  border-radius: 999px;
-  background: #fff5f2;
-  color: #20242f;
-}
-
-.publish-phone__note-bottom > button img {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-}
-
-.publish-phone__note-bottom > button span {
-  max-width: 74px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-}
-
-.publish-phone__note-bottom > button strong {
-  color: #ff4a5f;
-  font-size: 12px;
-}
-
-.publish-phone__note-bottom > div {
-  display: inline-flex;
-  gap: 10px;
-  color: #646d7b;
-  font-size: 12px;
-}
-
-.publish-phone__feed-shell {
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-}
-
-.publish-phone__feed-topbar {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  padding: 0 10px;
-  height: 42px;
-}
-
-.publish-phone__feed-topbar > strong {
-  color: #ff5a45;
-  font-size: 19px;
-  font-weight: 860;
-}
-
-.publish-phone__feed-topbar > div {
-  overflow: hidden;
-  height: 26px;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: #f3f4f6;
-  color: #a4abb7;
-  font-size: 11px;
-  line-height: 26px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.publish-phone__feed-topbar > span {
-  display: inline-flex;
-  gap: 4px;
-}
-
-.publish-phone__feed-topbar > span i {
-  min-width: 16px;
-  height: 16px;
-  padding: 0 3px;
-  border-radius: 999px;
-  background: #ff5a45;
-  color: #fff;
-  font-size: 10px;
-  font-style: normal;
-  line-height: 16px;
-  text-align: center;
-}
-
-.publish-phone__feed-filters {
-  display: flex;
-  gap: 8px;
-  padding: 6px 10px 9px;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.publish-phone__feed-filters strong,
-.publish-phone__feed-filters span {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
-  font-size: 12px;
-}
-
-.publish-phone__feed-filters strong {
-  background: #fff0ed;
-  color: #ff5a45;
-}
-
-.publish-phone__feed-filters span {
-  border: 1px solid #eceff3;
-  color: #6d7482;
-}
-
 .publish-phone__feed-waterfall {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-  padding: 0 10px 10px;
+  padding: 10px;
   overflow-y: auto;
 }
 
@@ -1902,8 +1461,11 @@ async function submit() {
   background: #fff;
 }
 
+.publish-phone__feed-card.is-current {
+  border-color: #ffd1c8;
+}
+
 .publish-phone__feed-media {
-  position: relative;
   overflow: hidden;
   border-radius: 10px 10px 0 0;
   background: #e8ecf1;
@@ -1911,39 +1473,15 @@ async function submit() {
 
 .publish-phone__feed-media img {
   width: 100%;
-  min-height: 128px;
+  min-height: 120px;
   object-fit: cover;
 }
 
 .publish-phone__feed-text {
-  display: -webkit-box;
   padding: 10px;
-  overflow: hidden;
   color: #48505d;
   font-size: 12px;
   line-height: 1.58;
-  white-space: normal;
-  word-break: break-word;
-  text-overflow: ellipsis;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 10;
-}
-
-.publish-phone__feed-card.is-text .publish-phone__feed-media {
-  background: #f5f7fb;
-}
-
-.publish-phone__feed-media small {
-  position: absolute;
-  right: 7px;
-  bottom: 7px;
-  height: 19px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: rgba(16, 20, 28, 0.75);
-  color: #fff;
-  font-size: 10px;
-  line-height: 19px;
 }
 
 .publish-phone__feed-meta {
@@ -1971,14 +1509,13 @@ async function submit() {
 }
 
 .publish-phone__feed-meta h4 {
-  display: -webkit-box;
   margin: 6px 0 4px;
   overflow: hidden;
   color: #1f2633;
   font-size: 12px;
   line-height: 1.45;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .publish-phone__feed-meta p {
@@ -1993,35 +1530,6 @@ async function submit() {
   margin-top: 6px;
   color: #7f8796;
   font-size: 11px;
-}
-
-.publish-phone__tabbar {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  align-items: center;
-  height: 58px;
-  border-top: 1px solid #eceff3;
-  background: #fff;
-  color: #8f96a4;
-  text-align: center;
-  font-size: 12px;
-}
-
-.publish-phone__tabbar strong {
-  color: #ff5a45;
-}
-
-.publish-phone__tabbar b {
-  display: grid;
-  place-items: center;
-  width: 33px;
-  height: 33px;
-  margin: 0 auto;
-  border-radius: 50%;
-  background: #ff5a45;
-  color: #fff;
-  font-size: 24px;
-  line-height: 1;
 }
 
 @media (max-width: 1360px) {
@@ -2056,7 +1564,6 @@ async function submit() {
   }
 
   .publish-studio__left {
-    grid-template-rows: auto;
     margin-bottom: 12px;
   }
 
@@ -2065,39 +1572,37 @@ async function submit() {
     display: none;
   }
 
-  .publish-studio__type-card {
-    display: flex;
+  .publish-studio__compose-row {
+    grid-template-columns: 1fr;
     gap: 8px;
-    overflow-x: auto;
-    padding: 10px;
   }
 
-  .publish-studio__type-card h2 {
-    display: none;
+  .publish-studio__compose-label {
+    min-height: auto;
   }
 
-  .publish-studio__type-card button {
-    flex: 0 0 auto;
-    width: auto;
-    height: 38px;
+  .publish-studio__description-actions,
+  .publish-studio__asset-footer,
+  .publish-studio__cover-box {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
-  .publish-studio__title-field input {
-    font-size: 18px;
+  .publish-studio__topic-entry {
+    flex-wrap: wrap;
   }
 
-  .publish-studio__covers {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .publish-studio__upload {
+  .publish-studio__topic-entry input {
     width: 100%;
   }
 
-  .publish-studio__row,
-  .publish-studio__publish-time {
+  .publish-studio__topic-search-list {
     grid-template-columns: 1fr;
-    align-items: start;
+    margin-inline: 14px;
+  }
+
+  .publish-studio__covers {
+    grid-template-columns: repeat(2, 84px);
   }
 }
 </style>

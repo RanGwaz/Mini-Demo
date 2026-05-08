@@ -92,6 +92,8 @@ public class PostService {
         User author = userService.requireById(authorId);
         ContentChannel channel = resolveChannel(request);
         String postType = resolvePostType(channel, request.postType());
+        String title = normalizeTitle(request.title());
+        String content = request.content() == null ? "" : request.content().trim();
         List<String> normalizedTags = normalizeTags(request.tags());
         List<PostAssetRequest> assets = normalizeAssets(request);
         PostAssetRequest firstAsset = assets.isEmpty() ? null : assets.get(0);
@@ -100,8 +102,8 @@ public class PostService {
         post.setAuthorId(authorId);
         post.setChannelCode(channel.key());
         post.setPostType(postType);
-        post.setTitle(request.title());
-        post.setContent(request.content());
+        post.setTitle(title);
+        post.setContent(content);
         post.setExtra(toExtraJson(request.extra()));
         post.setTags(joinTags(normalizedTags));
         post.setTopicPath(channel.topicPath());
@@ -419,6 +421,14 @@ public class PostService {
             }
         }
         return null;
+    }
+
+    private String normalizeTitle(String rawTitle) {
+        if (rawTitle == null) {
+            return "无标题分享";
+        }
+        String title = rawTitle.trim();
+        return title.isBlank() ? "无标题分享" : title;
     }
 
     private List<String> parseCsv(String raw) {
