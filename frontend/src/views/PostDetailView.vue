@@ -30,7 +30,6 @@ import {
   hasPostMedia,
   normalizeMediaUrl,
 } from '../utils/postMedia'
-import { formatRelativeTimeZh } from '../utils/relativeTime'
 
 const route = useRoute()
 const router = useRouter()
@@ -50,7 +49,6 @@ const commentsLoading = ref(false)
 const commentsPage = ref(1)
 const commentsHasMore = ref(true)
 const commentDraft = ref('')
-const commentsListRef = ref<HTMLElement | null>(null)
 const lightboxOpen = ref(false)
 
 const relatedPosts = ref<PostView[]>([])
@@ -77,11 +75,6 @@ const authorAvatar = computed(() => normalizeMediaUrl(post.value?.author.avatarU
 
 const postAssets = computed(() => getPostMediaAssets(post.value))
 const hasDetailMedia = computed(() => postAssets.value.length > 0)
-const isMetaScrollMode = computed(() => hasDetailMedia.value && typeof metaMaxHeight.value === 'number' && metaMaxHeight.value > 0)
-const metaScrollStyle = computed(() => {
-  if (!isMetaScrollMode.value || !metaMaxHeight.value) return undefined
-  return { maxHeight: `${metaMaxHeight.value}px` }
-})
 
 const activeCoverUrl = computed(() => {
   const current = post.value
@@ -518,9 +511,9 @@ onUnmounted(() => {
         </div>
 
         <div v-else-if="post" class="detail-page__panel" :class="{ 'is-text-only': !hasDetailMedia }">
-          <div v-if="hasDetailMedia" ref="mediaRef" class="detail-page__media">
+          <div v-if="hasDetailMedia" class="detail-page__media">
             <div class="detail-page__media-wrap">
-              <img :src="activeCoverUrl" :alt="post.title || '作品图片'" @click="openLightbox" @load="syncMetaHeight" @error="onPostCoverError(post)" />
+              <img :src="activeCoverUrl" :alt="post.title || '作品图片'" @click="openLightbox" @error="onPostCoverError(post)" />
               <button type="button" class="detail-page__zoom-btn" @click="openLightbox">查看大图</button>
               <button v-if="postAssets.length > 1" type="button" class="detail-page__asset-arrow is-left" @click="showPrevAsset">
                 <el-icon><ArrowLeft /></el-icon>

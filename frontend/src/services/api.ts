@@ -48,16 +48,6 @@ export interface PublishSuggestionsResponse {
   trendingTags: PublishTagSuggestion[]
 }
 
-export interface ChannelView {
-  code: string
-  name: string
-  description: string
-  icon?: string
-  sortOrder: number
-  postType: string
-  waterfall: boolean
-}
-
 const slowRequestConfig = {
   timeout: LONG_REQUEST_TIMEOUT_MS,
 }
@@ -139,16 +129,6 @@ export const api = {
     assets?: CreatePostAssetPayload[]
   }) {
     return unwrap<PostView>(http.post('/api/posts', payload))
-  },
-  trackBehavior(payload: {
-    postId: number
-    channelCode?: string
-    behaviorType: string
-    duration?: number
-    scene?: string
-    position?: number
-  }) {
-    return unwrap<void>(http.post('/api/behaviors', payload))
   },
   publishSuggestions(channel?: string, keyword?: string) {
     return unwrap<PublishSuggestionsResponse>(guestHttp.get('/api/taxonomy/publish-suggestions', {

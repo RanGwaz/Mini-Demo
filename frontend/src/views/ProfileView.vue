@@ -749,16 +749,13 @@ onMounted(() => {
 
 .profile-home__card.is-text-only .profile-home__card-body {
   padding: 14px;
-  min-height: 276px;
 }
 
 .profile-home__card.is-text-only .profile-home__card-body h3 {
-  min-height: calc(1.45em * 3);
   -webkit-line-clamp: 3;
 }
 
 .profile-home__card.is-text-only .profile-home__card-body p {
-  min-height: calc(1.5em * 6);
   -webkit-line-clamp: 6;
 }
 

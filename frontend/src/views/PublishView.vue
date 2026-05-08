@@ -8,36 +8,20 @@ import {
   Close,
   Edit,
   Plus,
+  Promotion,
+  Share,
+  Star,
   UploadFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { channelConfig } from '../config/channelConfig'
 import { defaultPublishChannelKey, publishChannels, type PublishChannelKey } from '../domain/contentTaxonomy'
 import { api, type CreatePostAssetPayload, type PublishTagSuggestion } from '../services/api'
 import { useAuthStore } from '../stores/auth'
 import type { UploadResponse } from '../types'
 
 type PreviewMode = 'note' | 'cover'
-
-const TITLE_LIMIT = 20
-const CONTENT_LIMIT = 1000
-const MAX_TOPICS_PER_POST = 7
-const RECOMMEND_TOPIC_LIMIT = 6
-
-type CoverPreviewCard = {
-  key: string
-  title: string
-  author: string
-  avatar: string
-  cover: string
-  content: string
-  current: boolean
-  likes: number
-  comments: number
-  topic: string
-}
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -54,7 +38,8 @@ const topicInput = ref('')
 const quickTopics = ref<string[]>([])
 const topicRecommendations = ref<PublishTagSuggestion[]>([])
 const activeChannel = ref<PublishChannelKey>(defaultPublishChannelKey)
-let topicSearchTimer: number | undefined
+const visibility = ref('public')
+let tagSearchTimer: number | undefined
 
 const form = reactive({
   title: '',
@@ -67,86 +52,46 @@ const drafts = [
   { title: '校园晚饭打卡', time: '昨天 22:45', status: '已保存', image: 'https://picsum.photos/seed/draft-campus/120/90' },
 ]
 
-const sampleCoverCards: CoverPreviewCard[] = [
-  {
-    key: 'sample-1',
-    title: '圣托里尼的日落，永远看不腻',
-    author: '小米在旅行',
-    avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=travel',
-    cover: 'https://picsum.photos/seed/preview-sunset/500/640',
-    content: '',
-    current: false,
-    likes: 832,
-    comments: 56,
-    topic: '#旅行打卡',
-  },
-  {
-    key: 'sample-2',
-    title: '沉浸式肩背训练，今日份出汗',
-    author: '卡卡爱健身',
-    avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=fit',
-    cover: 'https://picsum.photos/seed/preview-fitness/500/650',
-    content: '',
-    current: false,
-    likes: 921,
-    comments: 42,
-    topic: '#健身打卡',
-  },
-  {
-    key: 'sample-3',
-    title: '今天也是被治愈的一天',
-    author: '奶茶不加糖',
-    avatar: 'https://api.dicebear.com/9.x/adventurer/svg?seed=pet',
-    cover: 'https://picsum.photos/seed/preview-dog/500/560',
-    content: '',
-    current: false,
-    likes: 643,
-    comments: 23,
-    topic: '#日常碎片',
-  },
+const sampleCoverCards = [
+  { key: 'sample-1', title: '示例笔记标题1', author: '用户名', height: '182px' },
+  { key: 'sample-2', title: '示例笔记标题2', author: '用户名', height: '214px' },
+  { key: 'sample-3', title: '示例笔记标题3', author: '用户名', height: '190px' },
 ]
 
 const titleCount = computed(() => form.title.length)
 const contentCount = computed(() => form.content.length)
 const currentChannelLabel = computed(() => publishChannels.find((item) => item.key === activeChannel.value)?.label || publishChannels[0]?.label || '')
-const currentPostType = computed(() => channelConfig[activeChannel.value].postType)
 const currentUserName = computed(() => authStore.currentUser?.nickname || 'Vibelo 用户')
 const currentUserAvatar = computed(() => authStore.currentUser?.avatarUrl || 'https://api.dicebear.com/9.x/adventurer/svg?seed=creator')
 const hasImages = computed(() => uploadedAssets.value.length > 0)
 const coverAsset = computed(() => uploadedAssets.value[0] || null)
 const currentCover = computed(() => coverAsset.value ? resolveAssetCover(coverAsset.value) : '')
 const previewParagraphs = computed(() => form.content.split('\n').map((line) => line.trim()).filter(Boolean).slice(0, 5))
-const previewTopicList = computed(() => {
-  if (selectedTopics.value.length > 0) return selectedTopics.value.slice(0, 4).map((item) => `#${item}`)
-  return ['#发现灵感', '#校园生活']
+const normalizedTagKeyword = computed(() => tagInput.value.trim().replace(/^#+/, '').replace(/\s+/g, ''))
+const showHashtagPanel = computed(() => tagInput.value.trim().startsWith('#'))
+const hashtagCandidates = computed(() => {
+  const keyword = normalizedTagKeyword.value
+  if (!keyword) return hashtagRecommendations.value
+  return hashtagRecommendations.value.filter((item) => item.name.includes(keyword))
 })
-const currentPreviewTopic = computed(() => previewTopicList.value[0] || '#发现灵感')
-const normalizedTopicKeyword = computed(() => topicInput.value.trim().replace(/^#+/, '').replace(/\s+/g, ''))
-const showTopicSearchPanel = computed(() => topicInput.value.trim().startsWith('#'))
-const topicCandidates = computed(() => {
-  const keyword = normalizedTopicKeyword.value
-  if (!keyword) return topicRecommendations.value
-  return topicRecommendations.value.filter((item) => item.name.includes(keyword))
-})
-const displayQuickTopics = computed(() => quickTopics.value.slice(0, RECOMMEND_TOPIC_LIMIT))
-const quickTopicOverflow = computed(() => Math.max(0, quickTopics.value.length - RECOMMEND_TOPIC_LIMIT))
-const canPublish = computed(() => !loading.value && !uploading.value)
-
-const coverPreviewCards = computed<CoverPreviewCard[]>(() => [
+const coverPreviewCards = computed(() => [
   {
     key: 'current',
-    title: form.title.trim() || '无标题分享',
+    title: form.title.trim() || '示例笔记标题1',
     author: currentUserName.value,
-    avatar: currentUserAvatar.value,
     cover: currentCover.value,
-    content: form.content.trim() || '内容为空时，这里会显示简短占位文案。',
+    content: form.content.trim(),
     current: true,
-    likes: 0,
-    comments: 0,
-    topic: currentPreviewTopic.value,
+    height: '142px',
   },
-  ...sampleCoverCards,
+  ...sampleCoverCards.map((item) => ({ ...item, cover: '', content: '', current: false })),
 ])
+const canPublish = computed(() => {
+  if (loading.value || uploading.value) return false
+  if (!form.title.trim() || !form.content.trim()) return false
+  if (selectedKind.value === 'image' && uploadedAssets.value.length === 0) return false
+  return true
+})
 
 onMounted(() => {
   void loadPublishSuggestions()
@@ -197,8 +142,8 @@ function addTopic(raw: string) {
     topicInput.value = ''
     return
   }
-  if (selectedTopics.value.length >= MAX_TOPICS_PER_POST) {
-    ElMessage.info(`最多添加 ${MAX_TOPICS_PER_POST} 个话题`)
+  if (selectedTags.value.length >= 10) {
+    ElMessage.info('最多添加 10 个标签')
     return
   }
   selectedTopics.value = [...selectedTopics.value, normalized]
@@ -289,27 +234,20 @@ function toAssetsPayload(): CreatePostAssetPayload[] {
 async function submit() {
   loading.value = true
   try {
-    const finalTopics = uniqueTopics(selectedTopics.value).slice(0, MAX_TOPICS_PER_POST)
-    const assets = toAssetsPayload()
-    const imageUrls = assets.map((asset) => asset.fileUrl).filter(Boolean)
+    const finalTags = uniqueTags(selectedTags.value).slice(0, 10)
+    const assets = selectedKind.value === 'image' ? toAssetsPayload() : []
     const payload: {
       title: string
       content: string
       channel: string
-      channelCode: string
-      postType: string
-      imageUrls?: string[]
       tags?: string[]
       assets?: CreatePostAssetPayload[]
     } = {
       title: form.title.trim(),
       content: form.content.trim(),
       channel: activeChannel.value,
-      channelCode: activeChannel.value,
-      postType: currentPostType.value,
-      ...(finalTopics.length > 0 ? { tags: finalTopics } : {}),
+      ...(finalTags.length > 0 ? { tags: finalTags } : {}),
       ...(assets.length > 0 ? { assets } : {}),
-      ...(imageUrls.length > 0 ? { imageUrls } : {}),
     }
 
     await api.createPost(payload)
@@ -554,62 +492,83 @@ async function submit() {
           </div>
 
           <template v-if="previewMode === 'note'">
-            <div class="publish-phone__note-shell">
-              <section class="publish-phone__note-scroll">
-                <article class="publish-phone__note-article">
-                  <div v-if="currentCover" class="publish-phone__note-hero-wrap">
-                    <img class="publish-phone__note-hero" :src="currentCover" alt="" />
-                  </div>
+            <header class="publish-phone__note-head">
+              <button type="button">‹</button>
+              <img :src="currentUserAvatar" alt="" />
+              <span>
+                <strong>{{ currentUserName }}</strong>
+                <small>{{ currentChannelLabel }}</small>
+              </span>
+              <button type="button" class="is-follow">关注</button>
+              <el-icon><Share /></el-icon>
+            </header>
 
-                  <div class="publish-phone__note-author">
-                    <img :src="currentUserAvatar" alt="" />
-                    <span>
-                      <strong>{{ currentUserName }}</strong>
-                      <small>{{ currentChannelLabel }}</small>
-                    </span>
-                  </div>
+            <img v-if="currentCover" class="publish-phone__hero" :src="currentCover" alt="" />
+            <section class="publish-phone__note-body" :class="{ 'is-text-only': !currentCover }">
+              <h3>{{ form.title || '填写标题后在这里预览' }}</h3>
+              <p v-if="previewParagraphs.length === 0">输入正文后，移动端笔记内容会在这里展示。</p>
+              <p v-for="line in previewParagraphs" :key="line">{{ line }}</p>
+              <div v-if="selectedTags.length > 0" class="publish-phone__tags">
+                <span v-for="tag in selectedTags.slice(0, 4)" :key="tag">#{{ tag }}</span>
+              </div>
+            </section>
 
-                  <section class="publish-phone__note-copy">
-                    <h3>{{ form.title || '无标题分享' }}</h3>
-                    <p v-if="previewParagraphs.length === 0">正文为空时，发布后也支持展示。</p>
-                    <p v-for="line in previewParagraphs" :key="line">{{ line }}</p>
-                    <div class="publish-phone__note-topics">
-                      <span v-for="topic in previewTopicList" :key="topic">{{ topic }}</span>
-                    </div>
-                  </section>
-                </article>
-              </section>
-            </div>
+            <section class="publish-phone__comment-empty">
+              <img :src="currentUserAvatar" alt="" />
+              <div>说点什么，让大家认识这篇笔记</div>
+            </section>
+
+            <footer class="publish-phone__note-actions">
+              <span><el-icon><Promotion /></el-icon> 说点什么...</span>
+              <button type="button"><span>♡</span>点赞</button>
+              <button type="button"><el-icon><Star /></el-icon>收藏</button>
+              <button type="button"><el-icon><ChatLineRound /></el-icon>评论</button>
+            </footer>
           </template>
 
           <template v-else>
-            <div class="publish-phone__feed-shell">
-              <section class="publish-phone__feed-waterfall">
-                <article
-                  v-for="card in coverPreviewCards"
-                  :key="card.key"
-                  class="publish-phone__feed-card"
-                  :class="{ 'is-current': card.current, 'is-text': !card.cover }"
-                >
-                  <div class="publish-phone__feed-media">
-                    <img v-if="card.cover" :src="card.cover" alt="" />
-                    <div v-else class="publish-phone__feed-text">{{ card.content }}</div>
-                  </div>
-                  <div class="publish-phone__feed-meta">
-                    <div class="publish-phone__feed-user">
-                      <img :src="card.avatar" alt="" />
-                      <span>{{ card.author }}</span>
-                    </div>
-                    <h4 v-if="card.cover">{{ card.title }}</h4>
-                    <p>{{ card.topic }}</p>
-                    <footer>
-                      <span>赞 {{ card.likes }}</span>
-                      <span>评 {{ card.comments }}</span>
-                    </footer>
-                  </div>
-                </article>
-              </section>
+            <header class="publish-phone__discover-head">
+              <button type="button">☰</button>
+              <nav>
+                <span>关注</span>
+                <strong>发现</strong>
+                <span>附近</span>
+              </nav>
+              <button type="button">⌕</button>
+            </header>
+            <div class="publish-phone__discover-tabs">
+              <strong>推荐</strong>
+              <span>直播</span>
+              <span>短剧</span>
+              <span>穿搭</span>
+              <span>旅行</span>
+              <span>动漫</span>
             </div>
+            <section class="publish-phone__waterfall">
+              <article
+                v-for="card in coverPreviewCards"
+                :key="card.key"
+                class="publish-phone__cover-card"
+                :class="{ 'is-current': card.current, 'is-text-only': !card.cover }"
+              >
+                <img v-if="card.cover" :src="card.cover" alt="" />
+                <div v-else class="publish-phone__cover-placeholder" :style="{ height: card.height || '148px' }">
+                  <p v-if="card.current">{{ card.content || '纯文本笔记会以文字卡片形式出现在信息流。' }}</p>
+                </div>
+                <h4>{{ card.title }}</h4>
+                <footer>
+                  <span>{{ card.author }}</span>
+                  <em>♡ 0</em>
+                </footer>
+              </article>
+            </section>
+            <footer class="publish-phone__tabbar">
+              <strong>首页</strong>
+              <span>市集</span>
+              <b>+</b>
+              <span>消息</span>
+              <span>我</span>
+            </footer>
           </template>
         </div>
       </section>
@@ -1356,180 +1315,304 @@ async function submit() {
   border-radius: 6px;
 }
 
-.publish-phone__note-shell,
-.publish-phone__feed-shell {
+.publish-phone__note-head,
+.publish-phone__discover-head {
   display: grid;
-  height: calc(100% - 42px);
-}
-
-.publish-phone__note-scroll {
-  overflow-y: auto;
-  background: #fcfcfd;
-}
-
-.publish-phone__note-article {
-  background: #fff;
-}
-
-.publish-phone__note-hero {
-  display: block;
-  width: 100%;
-  max-height: 260px;
-  object-fit: cover;
-}
-
-.publish-phone__note-author {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px 8px;
+  min-height: 44px;
+  padding: 0 14px;
 }
 
-.publish-phone__note-author img {
+.publish-phone__note-head {
+  grid-template-columns: 24px 34px minmax(0, 1fr) 54px 24px;
+  gap: 8px;
+}
+
+.publish-phone__note-head button,
+.publish-phone__discover-head button {
+  border: none;
+  background: transparent;
+  color: #1f2632;
+  cursor: pointer;
+}
+
+.publish-phone__note-head button:first-child {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.publish-phone__note-head img {
   width: 34px;
   height: 34px;
   border-radius: 50%;
   object-fit: cover;
 }
 
-.publish-phone__note-author span {
+.publish-phone__note-head span {
   min-width: 0;
   display: grid;
-  gap: 1px;
 }
 
-.publish-phone__note-author strong {
+.publish-phone__note-head strong {
   overflow: hidden;
-  color: #1f2633;
+  color: #18202d;
   font-size: 13px;
-  font-weight: 760;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.publish-phone__note-author small {
-  overflow: hidden;
-  color: #9aa1ad;
+.publish-phone__note-head small {
+  color: #8b93a1;
   font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.publish-phone__note-copy {
-  padding: 0 12px 12px;
-}
-
-.publish-phone__note-copy h3 {
-  margin: 0 0 8px;
-  color: #20242f;
-  font-size: 20px;
-  line-height: 1.32;
-}
-
-.publish-phone__note-copy p {
-  margin: 0 0 6px;
-  color: #3f4652;
-  font-size: 13px;
-  line-height: 1.66;
-}
-
-.publish-phone__note-topics {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 7px;
-}
-
-.publish-phone__note-topics span {
-  color: #4f73d8;
+.publish-phone__note-head .is-follow {
+  height: 26px;
+  border: 1px solid #ff4560;
+  border-radius: 999px;
+  color: #ff3150;
   font-size: 12px;
+  font-weight: 760;
 }
 
-.publish-phone__feed-waterfall {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  padding: 10px;
-  overflow-y: auto;
-}
-
-.publish-phone__feed-card {
-  align-self: start;
-  border: 1px solid #edf0f4;
-  border-radius: 10px;
-  background: #fff;
-}
-
-.publish-phone__feed-card.is-current {
-  border-color: #ffd1c8;
-}
-
-.publish-phone__feed-media {
-  overflow: hidden;
-  border-radius: 10px 10px 0 0;
-  background: #e8ecf1;
-}
-
-.publish-phone__feed-media img {
+.publish-phone__hero {
+  display: block;
   width: 100%;
-  min-height: 120px;
+  max-height: 270px;
   object-fit: cover;
 }
 
-.publish-phone__feed-text {
-  padding: 10px;
-  color: #48505d;
-  font-size: 12px;
-  line-height: 1.58;
+.publish-phone__note-body {
+  min-height: 170px;
+  padding: 18px 18px 10px;
 }
 
-.publish-phone__feed-meta {
-  padding: 7px 8px;
+.publish-phone__note-body.is-text-only {
+  min-height: 310px;
 }
 
-.publish-phone__feed-user {
+.publish-phone__note-body h3 {
+  margin: 0 0 10px;
+  color: #20242f;
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.publish-phone__note-body p {
+  margin: 0 0 8px;
+  color: #4b5563;
+  font-size: 13px;
+  line-height: 1.72;
+  white-space: pre-wrap;
+}
+
+.publish-phone__tags {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
+  margin-top: 10px;
 }
 
-.publish-phone__feed-user img {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-}
-
-.publish-phone__feed-user span {
-  overflow: hidden;
-  color: #5d6573;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.publish-phone__feed-meta h4 {
-  margin: 6px 0 4px;
-  overflow: hidden;
-  color: #1f2633;
+.publish-phone__tags span {
+  color: #496fd2;
   font-size: 12px;
-  line-height: 1.45;
-  text-overflow: ellipsis;
+}
+
+.publish-phone__comment-empty {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  margin: 0 18px;
+  padding-top: 22px;
+  color: #b0b5be;
+  font-size: 12px;
+}
+
+.publish-phone__comment-empty img {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.publish-phone__comment-empty div {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: #f5f5f6;
+  line-height: 30px;
+}
+
+.publish-phone__note-actions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 10px;
+  height: 58px;
+  padding: 0 14px 8px;
+  border-top: 1px solid #f0f1f3;
+  background: #fff;
+}
+
+.publish-phone__note-actions span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: #f5f6f8;
+  color: #9aa1ad;
+  font-size: 12px;
+}
+
+.publish-phone__note-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: none;
+  background: transparent;
+  color: #20242f;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.publish-phone__discover-head {
+  grid-template-columns: 30px minmax(0, 1fr) 30px;
+}
+
+.publish-phone__discover-head nav {
+  display: flex;
+  justify-content: center;
+  gap: 25px;
+  color: #a1a6af;
+  font-size: 14px;
+}
+
+.publish-phone__discover-head strong {
+  color: #20242f;
+}
+
+.publish-phone__discover-tabs {
+  display: flex;
+  gap: 18px;
+  height: 30px;
+  padding: 0 14px;
+  overflow: hidden;
+  color: #9ca2ad;
+  font-size: 12px;
   white-space: nowrap;
 }
 
-.publish-phone__feed-meta p {
+.publish-phone__discover-tabs strong {
+  color: #20242f;
+}
+
+.publish-phone__waterfall {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  height: calc(100% - 130px);
+  padding: 0 12px 70px;
+  overflow: hidden;
+}
+
+.publish-phone__cover-card {
+  overflow: hidden;
+  align-self: start;
+  border-radius: 3px;
+  background: #fff;
+}
+
+.publish-phone__cover-card img,
+.publish-phone__cover-placeholder {
+  display: block;
+  width: 100%;
+  min-height: 136px;
+  border-radius: 3px;
+  background: #e9e9e9;
+  object-fit: cover;
+}
+
+.publish-phone__cover-card.is-current.is-text-only .publish-phone__cover-placeholder {
+  min-height: 142px;
+  padding: 12px;
+  background: linear-gradient(180deg, #fbfcff, #f3f6fb);
+}
+
+.publish-phone__cover-placeholder p {
+  display: -webkit-box;
   margin: 0;
-  color: #4f73d8;
+  overflow: hidden;
+  color: #4b5563;
+  font-size: 12px;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+}
+
+.publish-phone__cover-card h4 {
+  display: -webkit-box;
+  margin: 7px 4px 4px;
+  overflow: hidden;
+  color: #222936;
+  font-size: 13px;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.publish-phone__cover-card footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 4px 9px;
+  color: #8b93a1;
   font-size: 11px;
 }
 
-.publish-phone__feed-meta footer {
-  display: flex;
-  gap: 10px;
-  margin-top: 6px;
-  color: #7f8796;
-  font-size: 11px;
+.publish-phone__cover-card em {
+  color: #20242f;
+  font-style: normal;
+}
+
+.publish-phone__tabbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  align-items: center;
+  height: 58px;
+  padding-bottom: 8px;
+  border-top: 1px solid #f0f1f3;
+  background: #fff;
+  color: #979da8;
+  text-align: center;
+  font-size: 13px;
+}
+
+.publish-phone__tabbar strong {
+  color: #20242f;
+}
+
+.publish-phone__tabbar b {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 30px;
+  margin: 0 auto;
+  border-radius: 9px;
+  background: #ff3150;
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
 }
 
 @media (max-width: 1360px) {
