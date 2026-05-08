@@ -5,8 +5,10 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rangwaz.imagesocial.auth.dto.UserSummary;
+import com.rangwaz.imagesocial.channel.ChannelService;
 import com.rangwaz.imagesocial.common.api.PageResponse;
 import com.rangwaz.imagesocial.common.exception.BusinessException;
+import com.rangwaz.imagesocial.domain.entity.Channel;
 import com.rangwaz.imagesocial.domain.entity.ContentReport;
 import com.rangwaz.imagesocial.domain.entity.Post;
 import com.rangwaz.imagesocial.domain.entity.PostAsset;
@@ -14,6 +16,7 @@ import com.rangwaz.imagesocial.domain.entity.PostComment;
 import com.rangwaz.imagesocial.domain.entity.PostFavorite;
 import com.rangwaz.imagesocial.domain.entity.PostLike;
 import com.rangwaz.imagesocial.domain.entity.PostNegativeFeedback;
+import com.rangwaz.imagesocial.domain.entity.Topic;
 import com.rangwaz.imagesocial.domain.entity.User;
 import com.rangwaz.imagesocial.domain.mapper.ContentReportMapper;
 import com.rangwaz.imagesocial.domain.mapper.PostAssetMapper;
@@ -29,7 +32,8 @@ import com.rangwaz.imagesocial.post.dto.PostAssetView;
 import com.rangwaz.imagesocial.post.dto.PostImageView;
 import com.rangwaz.imagesocial.post.dto.PostView;
 import com.rangwaz.imagesocial.search.SearchIndexGateway;
-import com.rangwaz.imagesocial.taxonomy.ContentChannel;
+import com.rangwaz.imagesocial.topic.PostTopicService;
+import com.rangwaz.imagesocial.topic.TopicService;
 import com.rangwaz.imagesocial.user.UserService;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -61,6 +65,9 @@ public class PostService {
     private final UserService userService;
     private final EventService eventService;
     private final SearchIndexGateway searchIndexGateway;
+    private final ChannelService channelService;
+    private final TopicService topicService;
+    private final PostTopicService postTopicService;
     private final ObjectMapper objectMapper;
 
     public PostService(PostMapper postMapper,
@@ -73,6 +80,9 @@ public class PostService {
                        UserService userService,
                        EventService eventService,
                        SearchIndexGateway searchIndexGateway,
+                       ChannelService channelService,
+                       TopicService topicService,
+                       PostTopicService postTopicService,
                        ObjectMapper objectMapper) {
         this.postMapper = postMapper;
         this.postAssetMapper = postAssetMapper;
@@ -84,34 +94,48 @@ public class PostService {
         this.userService = userService;
         this.eventService = eventService;
         this.searchIndexGateway = searchIndexGateway;
+        this.channelService = channelService;
+        this.topicService = topicService;
+        this.postTopicService = postTopicService;
         this.objectMapper = objectMapper;
     }
 
     @Transactional
     public PostView createPost(Long authorId, CreatePostRequest request) {
         User author = userService.requireById(authorId);
-        ContentChannel channel = resolveChannel(request);
+        Channel channel = resolveChannel(request);
         String postType = resolvePostType(channel, request.postType());
         String title = normalizeTitle(request.title());
         String content = request.content() == null ? "" : request.content().trim();
-        List<String> normalizedTags = normalizeTags(request.tags());
+        List<Topic> publishTopics = topicService.resolvePublishTopics(
+                request.topicIds(),
+                request.topics(),
+                request.tags(),
+                channel,
+                authorId
+        );
+        List<String> normalizedTags = publishTopics.stream()
+                .map(Topic::getName)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
         List<PostAssetRequest> assets = normalizeAssets(request);
         PostAssetRequest firstAsset = assets.isEmpty() ? null : assets.get(0);
 
         Post post = new Post();
         post.setAuthorId(authorId);
-        post.setChannelCode(channel.key());
+        post.setChannelCode(channel.getCode());
         post.setPostType(postType);
         post.setTitle(title);
         post.setContent(content);
         post.setExtra(toExtraJson(request.extra()));
         post.setTags(joinTags(normalizedTags));
-        post.setTopicPath(channel.topicPath());
-        post.setSemanticTags(joinRawTerms(buildSemanticTerms(channel, normalizedTags)));
+        post.setTopicPath(buildTopicPath(channel, publishTopics));
+        post.setSemanticTags(joinRawTerms(buildSemanticTerms(channel, publishTopics, normalizedTags)));
         post.setStyleTags(assets.isEmpty() ? "text" : "image");
-        post.setTopicClusterKey(channel.key());
-        post.setSubtopicClusterKey(normalizedTags.isEmpty() ? channel.key() : normalizedTags.get(0));
-        post.setTaxonomyVersion(ContentChannel.TAXONOMY_VERSION);
+        post.setTopicClusterKey(channel.getCode());
+        post.setSubtopicClusterKey(publishTopics.isEmpty() ? channel.getCode() : publishTopics.get(0).getSlug());
+        post.setTaxonomyVersion("db-channel-topic-v1");
         post.setCoverUrl(firstAsset == null ? "" : firstAsset.fileUrl());
         post.setThumbUrl(firstAsset == null ? null : firstAsset.thumbUrl());
         post.setVisibility("PUBLIC");
@@ -141,13 +165,18 @@ public class PostService {
             postAssetMapper.insert(asset);
         }
 
+        postTopicService.replaceUserTopics(
+                post.getId(),
+                publishTopics.stream().map(Topic::getId).toList()
+        );
+
         PostView view = toView(post, author, "你的新内容");
         eventService.publish(
                 "POST_CREATE",
                 authorId,
                 "POST",
                 post.getId(),
-                Map.of("title", post.getTitle(), "channelCode", channel.key(), "postType", postType, "tags", normalizedTags)
+                Map.of("title", post.getTitle(), "channelCode", channel.getCode(), "postType", postType, "tags", normalizedTags)
         );
         searchIndexGateway.syncPost(view);
         return view;
@@ -312,16 +341,16 @@ public class PostService {
         if (author == null) {
             throw new BusinessException("帖子作者不存在");
         }
-        ContentChannel channel = ContentChannel.fromPostTaxonomy(firstNonBlank(post.getChannelCode(), post.getTopicClusterKey()), post.getTopicPath());
-        String postType = firstNonBlank(post.getPostType(), channel.postType());
+        String channelCode = firstNonBlank(post.getChannelCode(), post.getTopicClusterKey(), "campus");
+        String postType = firstNonBlank(post.getPostType(), "general_post");
         return new PostView(
                 post.getId(),
                 author,
                 post.getTitle(),
                 post.getContent(),
                 parseTags(post),
-                channel.key(),
-                channel.key(),
+                channelCode,
+                channelCode,
                 postType,
                 post.getTopicPath(),
                 parseCsv(post.getSemanticTags()),

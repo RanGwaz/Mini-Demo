@@ -340,6 +340,66 @@ public interface PostMapper extends BaseMapper<Post> {
 
     @Select("""
             <script>
+            SELECT DISTINCT p.*
+            FROM posts p
+            <if test='topicId != null or (topicSlug != null and topicSlug != "")'>
+              INNER JOIN post_topics pt ON pt.post_id = p.id
+              <if test='topicSlug != null and topicSlug != ""'>
+                INNER JOIN topics t ON t.id = pt.topic_id
+              </if>
+            </if>
+            WHERE p.visibility = 'PUBLIC'
+              AND p.audit_status = 'APPROVED'
+              <if test='channelCode != null and channelCode != ""'>
+                AND p.channel_code = #{channelCode}
+              </if>
+              <if test='topicId != null'>
+                AND pt.topic_id = #{topicId}
+              </if>
+              <if test='topicSlug != null and topicSlug != ""'>
+                AND t.slug = #{topicSlug}
+                AND t.status = 'ACTIVE'
+              </if>
+            ORDER BY p.hot_score DESC, p.created_at DESC
+            LIMIT #{limit} OFFSET #{offset}
+            </script>
+            """)
+    List<Post> selectPublicPostsByScope(@Param("channelCode") String channelCode,
+                                        @Param("topicId") Long topicId,
+                                        @Param("topicSlug") String topicSlug,
+                                        @Param("offset") int offset,
+                                        @Param("limit") int limit);
+
+    @Select("""
+            <script>
+            SELECT COUNT(DISTINCT p.id)
+            FROM posts p
+            <if test='topicId != null or (topicSlug != null and topicSlug != "")'>
+              INNER JOIN post_topics pt ON pt.post_id = p.id
+              <if test='topicSlug != null and topicSlug != ""'>
+                INNER JOIN topics t ON t.id = pt.topic_id
+              </if>
+            </if>
+            WHERE p.visibility = 'PUBLIC'
+              AND p.audit_status = 'APPROVED'
+              <if test='channelCode != null and channelCode != ""'>
+                AND p.channel_code = #{channelCode}
+              </if>
+              <if test='topicId != null'>
+                AND pt.topic_id = #{topicId}
+              </if>
+              <if test='topicSlug != null and topicSlug != ""'>
+                AND t.slug = #{topicSlug}
+                AND t.status = 'ACTIVE'
+              </if>
+            </script>
+            """)
+    long countPublicPostsByScope(@Param("channelCode") String channelCode,
+                                 @Param("topicId") Long topicId,
+                                 @Param("topicSlug") String topicSlug);
+
+    @Select("""
+            <script>
             SELECT p.*
             FROM (
               SELECT

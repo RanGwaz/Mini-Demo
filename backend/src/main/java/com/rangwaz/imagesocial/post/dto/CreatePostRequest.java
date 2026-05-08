@@ -13,6 +13,8 @@ public record CreatePostRequest(
         @Size(max = 64) String postType,
         List<String> imageUrls,
         List<String> tags,
+        List<Long> topicIds,
+        List<String> topics,
         Map<String, Object> extra,
         List<@Valid PostAssetRequest> assets
 ) {
@@ -21,6 +23,6 @@ public record CreatePostRequest(
                              String channel,
                              List<String> tags,
                              List<PostAssetRequest> assets) {
-        this(title, content, channel, null, null, null, tags, Map.of(), assets);
+        this(title, content, channel, null, null, null, tags, null, null, Map.of(), assets);
     }
 }

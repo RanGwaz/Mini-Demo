@@ -1408,3 +1408,7 @@ databaseChangeLog:
             columns:
               - column:
                   name: post_type
+
+  - includeAll:
+      path: db/changelog/sql
+      relativeToChangelogFile: false
