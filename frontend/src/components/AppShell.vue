@@ -16,6 +16,7 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AuthWallDialog from './AuthWallDialog.vue'
 import { useAuthStore } from '../stores/auth'
+import { normalizeMediaUrl } from '../utils/postMedia'
 
 type NavItem = {
   key: 'creator' | 'admin'
@@ -27,6 +28,7 @@ const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 const globalKeyword = ref('')
+const avatarBroken = ref(false)
 
 authStore.hydrate()
 
@@ -36,13 +38,10 @@ const navItems = computed<NavItem[]>(() => [
   { key: 'creator', label: '创作中心', path: '/publish' },
   ...(isAdmin.value ? [{ key: 'admin' as const, label: '运营后台', path: '/admin' }] : []),
 ])
+const currentAvatarUrl = computed(() => avatarBroken.value ? '' : normalizeMediaUrl(authStore.currentUser?.avatarUrl))
 
 function go(path: string) {
   void router.push(path)
-}
-
-function handleDeveloping(name: string) {
-  ElMessage.info(`${name} 功能正在完善中`)
 }
 
 function isNavActive(item: NavItem) {
@@ -67,6 +66,10 @@ function submitGlobalSearch() {
 
 function publish() {
   go('/publish')
+}
+
+function isTopActionActive(path: string) {
+  return route.path.startsWith(path)
 }
 
 async function handleAvatarCommand(command: string) {
@@ -101,6 +104,13 @@ watch(
   },
   { immediate: true },
 )
+
+watch(
+  () => authStore.currentUser?.avatarUrl,
+  () => {
+    avatarBroken.value = false
+  },
+)
 </script>
 
 <template>
@@ -134,11 +144,23 @@ watch(
       </nav>
 
       <div class="app-shell__actions">
-        <button type="button" class="app-shell__icon-action" aria-label="消息" @click="handleDeveloping('消息')">
+        <button
+          type="button"
+          class="app-shell__icon-action"
+          :class="{ 'is-active': isTopActionActive('/messages') }"
+          aria-label="消息"
+          @click="go('/messages')"
+        >
           <el-icon><ChatDotRound /></el-icon>
           <em>3</em>
         </button>
-        <button type="button" class="app-shell__icon-action" aria-label="通知" @click="handleDeveloping('通知')">
+        <button
+          type="button"
+          class="app-shell__icon-action"
+          :class="{ 'is-active': isTopActionActive('/notifications') }"
+          aria-label="通知"
+          @click="go('/notifications')"
+        >
           <el-icon><Bell /></el-icon>
           <em>12</em>
         </button>
@@ -146,9 +168,10 @@ watch(
         <el-dropdown trigger="click" placement="bottom-end" @command="handleAvatarCommand">
           <button type="button" class="app-shell__avatar-btn" aria-label="账户菜单" @click.stop>
             <img
-              v-if="authStore.currentUser?.avatarUrl"
-              :src="authStore.currentUser.avatarUrl"
-              :alt="authStore.currentUser.nickname"
+              v-if="currentAvatarUrl"
+              :src="currentAvatarUrl"
+              :alt="authStore.currentUser?.nickname || '用户头像'"
+              @error="avatarBroken = true"
             />
             <el-icon v-else><UserFilled /></el-icon>
             <span v-if="authStore.currentUser" />
@@ -328,7 +351,7 @@ watch(
   display: flex;
   align-items: stretch;
   justify-content: center;
-  gap: 24px;
+  gap: 12px;
   min-width: 0;
   height: 100%;
 }
@@ -337,28 +360,41 @@ watch(
   position: relative;
   display: inline-flex;
   align-items: center;
-  padding: 0 2px;
+  align-self: center;
+  height: 42px;
+  padding: 0 16px;
+  border-radius: 999px;
   color: #161b27;
   font-size: 16px;
   font-weight: 780;
   white-space: nowrap;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
 }
 
 .app-shell__nav button::after {
   content: '';
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 2px;
+  left: 18px;
+  right: 18px;
+  bottom: 7px;
+  height: 3px;
   border-radius: 999px;
   background: #ff5a45;
   transform: scaleX(0);
   transition: transform 0.18s ease;
 }
 
-.app-shell__nav button:hover,
+.app-shell__nav button:hover {
+  background:
+    linear-gradient(135deg, rgba(255, 90, 69, 0.13), rgba(255, 137, 92, 0.08)),
+    #fff;
+  color: #ff4f3b;
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(255, 90, 69, 0.13);
+}
+
 .app-shell__nav button.is-active {
+  background: #fff1ed;
   color: #ff4f3b;
 }
 
@@ -382,10 +418,15 @@ watch(
   height: 38px;
   border-radius: 50%;
   font-size: 22px;
+  transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
 }
 
-.app-shell__icon-action:hover {
-  background: #f2f4f7;
+.app-shell__icon-action:hover,
+.app-shell__icon-action.is-active {
+  background: #fff1ed;
+  color: #ff4f3b;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(255, 90, 69, 0.12);
 }
 
 .app-shell__icon-action em {
@@ -454,6 +495,13 @@ watch(
   color: #fff;
   font-size: 17px;
   font-weight: 780;
+  box-shadow: 0 12px 24px rgba(255, 90, 69, 0.22);
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.app-shell__publish:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 28px rgba(255, 90, 69, 0.30);
 }
 
 .app-shell__main {

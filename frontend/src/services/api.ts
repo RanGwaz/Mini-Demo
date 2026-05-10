@@ -62,6 +62,26 @@ export interface TopicView {
   hotScore?: number
 }
 
+export interface UserInterestFacetView {
+  facetType: string
+  facetKey: string
+  facetLabel: string
+  weight?: number
+}
+
+export interface UserInterestsResponse {
+  userId: number
+  facets: UserInterestFacetView[]
+  updatedAt?: string
+}
+
+export interface UserInterestFacetPayload {
+  facetType?: string
+  facetKey: string
+  facetLabel?: string
+  weight?: number
+}
+
 export interface AdminOverview {
   activeChannels: number
   activeTopics: number
@@ -387,10 +407,15 @@ export const api = {
   channelTopics(code: string, limit = 30) {
     return unwrap<TopicView[]>(guestHttp.get(`/api/channels/${code}/topics`, { params: { limit } }))
   },
-  channelPosts(code: string, page = 1, size = 24, sort: 'hot' | 'latest' = 'hot') {
+  channelPosts(code: string, page = 1, size = 24, sort: 'hot' | 'latest' = 'hot', topicSlug = '') {
     return unwrap<PageResponse<PostView>>(guestHttp.get(`/api/channels/${code}/posts`, {
       ...slowRequestConfig,
-      params: { page, size, sort },
+      params: {
+        page,
+        size,
+        sort,
+        ...(topicSlug ? { topicSlug } : {}),
+      },
     }))
   },
   searchTopics(keyword = '', limit = 20) {
@@ -403,24 +428,6 @@ export const api = {
   },
   trendingTopics(limit = 20) {
     return unwrap<TopicView[]>(guestHttp.get('/api/topics/trending', { params: { limit } }))
-  },
-  topicDetail(slug: string) {
-    return unwrap<TopicView>(guestHttp.get(`/api/topics/${slug}`))
-  },
-  topicPosts(slug: string, page = 1, size = 24, sort: 'hot' | 'latest' = 'hot') {
-    return unwrap<PageResponse<PostView>>(guestHttp.get(`/api/topics/${slug}/posts`, {
-      ...slowRequestConfig,
-      params: { page, size, sort },
-    }))
-  },
-  relatedTopics(slug: string, limit = 12) {
-    return unwrap<TopicView[]>(guestHttp.get(`/api/topics/${slug}/related`, { params: { limit } }))
-  },
-  followTopic(topicId: number) {
-    return unwrap<void>(http.post(`/api/topics/${topicId}/follow`))
-  },
-  unfollowTopic(topicId: number) {
-    return unwrap<void>(http.delete(`/api/topics/${topicId}/follow`))
   },
   similarPosts(postId: number, page = 1, size = 24, filters?: FeedQueryFilters, authMode: FeedRequestAuthMode = 'session') {
     const client = authMode === 'guest' ? guestHttp : http
@@ -498,6 +505,12 @@ export const api = {
   },
   updateProfile(payload: { nickname?: string; avatarUrl?: string; backgroundUrl?: string; bio?: string }) {
     return unwrap<UserSummary>(http.put('/api/users/me', payload))
+  },
+  myInterests() {
+    return unwrap<UserInterestsResponse>(http.get('/api/users/me/interests'))
+  },
+  updateMyInterests(payload: { facets: UserInterestFacetPayload[] }) {
+    return unwrap<UserInterestsResponse>(http.put('/api/users/me/interests', payload))
   },
   userPosts(userId: number, limit = 20) {
     return unwrap<PostView[]>(http.get(`/api/users/${userId}/posts`, { params: { limit } }))

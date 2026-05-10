@@ -8,9 +8,10 @@ const PostDetailView = () => import('../views/PostDetailView.vue')
 const ProfileView = () => import('../views/ProfileView.vue')
 const PublishView = () => import('../views/PublishView.vue')
 const ChannelView = () => import('../views/ChannelView.vue')
-const TopicView = () => import('../views/TopicView.vue')
 const SearchDiscoverView = () => import('../views/SearchDiscoverView.vue')
 const AdminView = () => import('../views/AdminView.vue')
+const MessagesView = () => import('../views/MessagesView.vue')
+const NotificationsView = () => import('../views/NotificationsView.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -47,14 +48,21 @@ const router = createRouter({
       component: ChannelView,
     },
     {
-      path: '/topics/:slug',
-      name: 'topic',
-      component: TopicView,
-    },
-    {
       path: '/search',
       name: 'search',
       component: SearchDiscoverView,
+    },
+    {
+      path: '/messages',
+      name: 'messages',
+      component: MessagesView,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/notifications',
+      name: 'notifications',
+      component: NotificationsView,
+      meta: { requiresAuth: true },
     },
     {
       path: '/profile',

@@ -59,9 +59,10 @@ public class ChannelController {
     public ApiResponse<PageResponse<PostView>> posts(@PathVariable String code,
                                                      @RequestParam(defaultValue = "1") int page,
                                                      @RequestParam(defaultValue = "24") int size,
-                                                     @RequestParam(defaultValue = "hot") String sort) {
+                                                     @RequestParam(defaultValue = "hot") String sort,
+                                                     @RequestParam(required = false) String topicSlug) {
         Channel channel = requireActiveChannel(code);
-        return ApiResponse.success(postService.listByChannel(channel.getCode(), sort, page, size));
+        return ApiResponse.success(postService.listPublicPostsByScope(channel.getCode(), null, topicSlug, sort, page, size));
     }
 
     private Channel requireActiveChannel(String code) {

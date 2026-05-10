@@ -3,6 +3,9 @@ defineOptions({ name: 'FeedView' })
 
 import {
   ArrowRight,
+  CirclePlus,
+  Close,
+  CollectionTag,
   RefreshRight,
   Search,
 } from '@element-plus/icons-vue'
@@ -17,7 +20,15 @@ import {
   type FeedChannelDefinition,
   type FeedModeKey,
 } from '../domain/contentTaxonomy'
-import { api, type ChannelView, type FeedQueryFilters, type FeedRequestAuthMode, type TopicView } from '../services/api'
+import {
+  api,
+  type ChannelView,
+  type FeedQueryFilters,
+  type FeedRequestAuthMode,
+  type TopicView,
+  type UserInterestFacetPayload,
+  type UserInterestFacetView,
+} from '../services/api'
 import { HttpError } from '../services/http'
 import { useAuthStore } from '../stores/auth'
 import type { PostView, UserSummary } from '../types'
@@ -48,6 +59,7 @@ const FEED_SCROLL_RESTORE_KEY = 'image-social-feed-scroll-restore'
 const FEED_REALTIME_REFRESH_KEY = 'image-social-feed-need-refresh'
 const FEED_CACHE_TTL_MS = 5 * 60 * 1000
 const FEED_SKELETON_ASPECT_RATIOS = ['3 / 4.7', '3 / 3.7', '3 / 4.25', '3 / 5.1', '3 / 3.35', '3 / 4.55']
+const WATCH_LATER_KEY = 'vibelo-watch-later-posts'
 
 type FeedPageChunk = {
   records: PostView[]
@@ -58,6 +70,22 @@ type FeedPageChunk = {
 }
 
 type FeedLoadSource = 'scroll' | 'background'
+
+type WatchLaterItem = {
+  postId: number
+  title: string
+  meta: string
+  image: string
+  authorName: string
+  savedAt: number
+}
+
+type CreatorRecommendation = {
+  user: UserSummary
+  bio: string
+  postCount: number
+  latestPostId?: number
+}
 
 const authStore = useAuthStore()
 const router = useRouter()
@@ -98,6 +126,11 @@ const feedRequestAuthMode = ref<FeedRequestAuthMode>('guest')
 const fallbackFeedNoticeShown = ref(false)
 const feedGuestFallbackActive = ref(false)
 const friendAuthorIds = ref<Set<number>>(new Set())
+const watchLaterItems = ref<WatchLaterItem[]>([])
+const interestFacets = ref<UserInterestFacetView[]>([])
+const interestDialogVisible = ref(false)
+const interestSaving = ref(false)
+const selectedInterestKeys = ref<Set<string>>(new Set())
 
 const isSearchResults = computed(() => Boolean(displayQuery.value.trim()))
 const showInitialFeedSkeleton = computed(() => !bootstrapped.value || (feedInitialLoading.value && posts.value.length === 0))
@@ -148,14 +181,61 @@ const recommendationSidePosts = computed(() => isForYouChannel.value ? posts.val
 const recommendationGuessPosts = computed(() => isForYouChannel.value ? posts.value.slice(1, 6) : [])
 const feedStreamPosts = computed(() => isForYouChannel.value ? posts.value.slice(6) : posts.value)
 const masonryColumns = computed(() => distributeIntoColumns(feedStreamPosts.value))
-
-const recommendedCreators = [
-  { name: '课间小岛', bio: '大学生活 | 校园记录' },
-  { name: '快门慢慢按', bio: '摄影爱好者 | 扫街练习' },
-  { name: '漫展衣橱记', bio: '二次元穿搭 | 日常搭配' },
-  { name: '毛球观察室', bio: '宠物日常 | 养宠记录' },
-  { name: '摸鱼效率局', bio: '程序员摸鱼 | AI 工具' },
-]
+const interestCandidateFacets = computed<UserInterestFacetView[]>(() => {
+  const channelFacets = audienceSegments.value.map((item) => ({
+    facetType: 'TOPIC',
+    facetKey: item.key,
+    facetLabel: item.label,
+    weight: 1,
+  }))
+  const hotTopicFacets = hotTopicRows.value.slice(0, 12).map((item) => ({
+    facetType: 'TAG',
+    facetKey: item.slug || item.name,
+    facetLabel: item.name,
+    weight: 1,
+  }))
+  return dedupeInterestFacets([...channelFacets, ...hotTopicFacets])
+})
+const displayedInterestFacets = computed(() => {
+  if (interestFacets.value.length > 0) return interestFacets.value.slice(0, 8)
+  return interestCandidateFacets.value.slice(0, 6)
+})
+const interestProfileNote = computed(() => (
+  authStore.currentUser
+    ? interestFacets.value.length > 0
+      ? `已订阅 ${interestFacets.value.length} 个兴趣，推荐会优先参考这些方向`
+      : '还没有手动配置兴趣，当前使用浏览和频道偏好推断'
+    : '登录后可以保存你的兴趣画像，并影响后续推荐'
+))
+const recommendedCreators = computed<CreatorRecommendation[]>(() => {
+  const seen = new Map<number, CreatorRecommendation>()
+  for (const post of posts.value) {
+    const author = post.author
+    if (!author?.id || author.id === authStore.currentUser?.id) continue
+    const existing = seen.get(author.id)
+    if (existing) {
+      existing.postCount += 1
+      continue
+    }
+    const labels = [
+      post.channelCode || post.channel || '内容创作',
+      ...(post.tags || []).slice(0, 2),
+    ].filter(Boolean)
+    seen.set(author.id, {
+      user: author,
+      bio: author.bio || labels.join(' | ') || '持续更新高质量内容',
+      postCount: 1,
+      latestPostId: post.id,
+    })
+  }
+  return [...seen.values()]
+    .sort((a, b) => Number(followingAuthorIds.value.has(a.user.id)) - Number(followingAuthorIds.value.has(b.user.id)))
+    .slice(0, 5)
+})
+const watchLaterRows = computed(() => {
+  if (watchLaterItems.value.length > 0) return watchLaterItems.value.slice(0, 4)
+  return posts.value.slice(0, 3).map(toWatchLaterItem)
+})
 
 const recommendationTabs = [
   { key: 'recommend', label: '综合推荐', mode: 'recommend' },
@@ -165,12 +245,6 @@ const recommendationTabs = [
   { key: 'fresh', label: '新鲜发布' },
   { key: 'longform', label: '长文精选' },
 ] satisfies Array<{ key: string; label: string; mode?: FeedModeKey }>
-
-const watchLaterRows = [
-  { title: '手机摄影进阶构图', meta: '8分钟阅读', image: 'https://picsum.photos/seed/watch-photo/120/80' },
-  { title: '如何高效整理灵感写作', meta: '6分钟阅读', image: 'https://picsum.photos/seed/watch-notes/120/80' },
-  { title: '猫咪为什么喜欢躲门口', meta: '5分钟阅读', image: 'https://picsum.photos/seed/watch-pet/120/80' },
-]
 
 let intersectionObserver: IntersectionObserver | null = null
 let loadMoreDebounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -400,8 +474,144 @@ function isPostLiking(postId: number) {
 }
 
 function creatorAvatar(index: number) {
-  const sample = posts.value[index % Math.max(1, posts.value.length)]
-  return normalizePostMediaUrl(sample?.author.avatarUrl) || DEFAULT_IMAGE_PLACEHOLDER
+  const sample = recommendedCreators.value[index]?.user || posts.value[index % Math.max(1, posts.value.length)]?.author
+  return normalizePostMediaUrl(sample?.avatarUrl) || DEFAULT_IMAGE_PLACEHOLDER
+}
+
+function interestKey(facet: Pick<UserInterestFacetView, 'facetType' | 'facetKey'>) {
+  return `${facet.facetType || 'TOPIC'}:${facet.facetKey}`
+}
+
+function dedupeInterestFacets(facets: UserInterestFacetView[]) {
+  const seen = new Set<string>()
+  const result: UserInterestFacetView[] = []
+  for (const facet of facets) {
+    if (!facet.facetKey || !facet.facetLabel) continue
+    const key = interestKey(facet)
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(facet)
+  }
+  return result
+}
+
+function applySelectedInterestKeys(facets: UserInterestFacetView[]) {
+  selectedInterestKeys.value = new Set(facets.map(interestKey))
+}
+
+async function loadUserInterests() {
+  if (!authStore.currentUser) {
+    interestFacets.value = []
+    applySelectedInterestKeys([])
+    return
+  }
+  try {
+    const data = await api.myInterests()
+    interestFacets.value = dedupeInterestFacets(data.facets || [])
+    applySelectedInterestKeys(interestFacets.value)
+  } catch {
+    interestFacets.value = []
+    applySelectedInterestKeys([])
+  }
+}
+
+function openInterestDialog() {
+  if (!authStore.currentUser) {
+    authStore.openAuthPrompt('manual')
+    return
+  }
+  applySelectedInterestKeys(interestFacets.value.length > 0 ? interestFacets.value : displayedInterestFacets.value)
+  interestDialogVisible.value = true
+}
+
+function toggleInterestFacet(facet: UserInterestFacetView) {
+  const next = new Set(selectedInterestKeys.value)
+  const key = interestKey(facet)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  selectedInterestKeys.value = next
+}
+
+function openInterestFacet(facet: UserInterestFacetView) {
+  if (channelTabs.value.some((item) => item.key === facet.facetKey)) {
+    selectChannel(facet.facetKey)
+    return
+  }
+  void router.push({ path: '/search', query: { q: facet.facetLabel || facet.facetKey } })
+}
+
+async function saveInterestProfile() {
+  if (!authStore.currentUser) {
+    authStore.openAuthPrompt('manual')
+    return
+  }
+  const selected = interestCandidateFacets.value.filter((facet) => selectedInterestKeys.value.has(interestKey(facet)))
+  const payload: UserInterestFacetPayload[] = selected.map((facet, index) => ({
+    facetType: facet.facetType || 'TOPIC',
+    facetKey: facet.facetKey,
+    facetLabel: facet.facetLabel,
+    weight: Number((1 + Math.max(0, selected.length - index) * 0.08).toFixed(2)),
+  }))
+  interestSaving.value = true
+  try {
+    const data = await api.updateMyInterests({ facets: payload })
+    interestFacets.value = dedupeInterestFacets(data.facets || [])
+    applySelectedInterestKeys(interestFacets.value)
+    interestDialogVisible.value = false
+    sessionStorage.setItem(FEED_REALTIME_REFRESH_KEY, '1')
+    ElMessage.success('兴趣画像已更新')
+    void reloadFeedByScope()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '兴趣画像保存失败')
+  } finally {
+    interestSaving.value = false
+  }
+}
+
+function toWatchLaterItem(post: PostView): WatchLaterItem {
+  return {
+    postId: post.id,
+    title: post.title || post.content?.slice(0, 24) || '无标题内容',
+    meta: `${post.author?.nickname || '匿名用户'} · ${post.channelCode || post.channel || '推荐'}`,
+    image: normalizeMediaUrl(post.thumbUrl || post.coverUrl || post.assets?.[0]?.thumbUrl || post.assets?.[0]?.fileUrl),
+    authorName: post.author?.nickname || '匿名用户',
+    savedAt: Date.now(),
+  }
+}
+
+function loadWatchLater() {
+  try {
+    const raw = localStorage.getItem(WATCH_LATER_KEY)
+    const parsed = raw ? JSON.parse(raw) as WatchLaterItem[] : []
+    watchLaterItems.value = Array.isArray(parsed) ? parsed.filter((item) => item?.postId).slice(0, 30) : []
+  } catch {
+    watchLaterItems.value = []
+  }
+}
+
+function persistWatchLater() {
+  localStorage.setItem(WATCH_LATER_KEY, JSON.stringify(watchLaterItems.value.slice(0, 30)))
+}
+
+function addWatchLater(post?: PostView | null) {
+  const target = post || recommendationLeadPost.value || posts.value[0]
+  if (!target) {
+    ElMessage.info('当前没有可加入的内容')
+    return
+  }
+  const next = [toWatchLaterItem(target), ...watchLaterItems.value.filter((item) => item.postId !== target.id)]
+  watchLaterItems.value = next.slice(0, 30)
+  persistWatchLater()
+  ElMessage.success('已加入稍后再看')
+}
+
+function removeWatchLater(postId: number) {
+  watchLaterItems.value = watchLaterItems.value.filter((item) => item.postId !== postId)
+  persistWatchLater()
+}
+
+function openWatchLater(item: WatchLaterItem) {
+  void router.push(`/posts/${item.postId}`)
 }
 
 function computeColumnCount() {
@@ -1220,6 +1430,7 @@ watch(
     followSetResolvedUserId.value = null
     friendSetResolvedUserId.value = null
     resetFeedRequestAuthMode()
+    void loadUserInterests()
     if (!bootstrapped.value) return
     if (!isSearchResults.value) {
       refreshFeedSeed()
@@ -1231,6 +1442,9 @@ watch(
 
 onMounted(async () => {
   resetFeedRequestAuthMode()
+  loadWatchLater()
+  void loadUserInterests()
+  void loadFollowSet()
   const hotTopicsTask = loadHotTopics()
   await loadFeedChannels()
   applyRouteFeedState()
@@ -1546,28 +1760,29 @@ onUnmounted(() => {
         <section class="feed-home__right-card">
           <div class="feed-home__right-title">
             <strong>你的兴趣画像</strong>
-            <button type="button">编辑</button>
+            <button type="button" @click="openInterestDialog">编辑</button>
           </div>
           <div class="feed-home__interest-profile">
             <button
-              v-for="item in recommendationInterests"
-              :key="`profile-${item.key}`"
+              v-for="item in displayedInterestFacets"
+              :key="`profile-${interestKey(item)}`"
               type="button"
-              @click="selectChannel(item.key)"
+              @click="openInterestFacet(item)"
             >
-              {{ item.label }}
+              <el-icon><CollectionTag /></el-icon>
+              {{ item.facetLabel }}
             </button>
           </div>
-          <p class="feed-home__right-note">基于你的浏览与互动行为分析得出</p>
+          <p class="feed-home__right-note">{{ interestProfileNote }}</p>
         </section>
 
         <section class="feed-home__right-card">
           <div class="feed-home__right-title">
-            <strong>今日热门话题</strong>
+            <strong>热门标签</strong>
             <button type="button">更多 <el-icon><ArrowRight /></el-icon></button>
           </div>
           <ol class="feed-home__topic-list">
-            <li v-for="(topic, index) in hotTopicRows" :key="topic.name" @click="router.push(`/topics/${topic.slug}`)">
+            <li v-for="(topic, index) in hotTopicRows" :key="topic.name" @click="router.push({ path: '/search', query: { q: topic.name } })">
               <span>{{ index + 1 }}</span>
               <strong># {{ topic.name }}</strong>
               <em>{{ formatTopicHeat(topic) }}</em>
@@ -1601,33 +1816,51 @@ onUnmounted(() => {
       <section class="feed-home__right-card">
         <div class="feed-home__right-title">
           <strong>推荐创作者</strong>
-          <button type="button">换一换</button>
+          <button type="button" @click="reloadFeedByScope">换一换</button>
         </div>
         <div class="feed-home__creator-list">
-          <article v-for="(creator, index) in recommendedCreators" :key="creator.name">
-            <img :src="creatorAvatar(index)" alt="" />
-            <span>
-              <strong>{{ creator.name }}</strong>
-              <small>{{ creator.bio }}</small>
+          <article v-for="(creator, index) in recommendedCreators" :key="creator.user.id">
+            <img :src="creatorAvatar(index)" alt="" @click="router.push(`/users/${creator.user.id}`)" />
+            <span @click="router.push(`/users/${creator.user.id}`)">
+              <strong>{{ creator.user.nickname || creator.user.username }}</strong>
+              <small>{{ creator.bio }} · {{ creator.postCount }} 篇</small>
             </span>
-            <button type="button">关注</button>
+            <button
+              type="button"
+              :class="{ 'is-following': followingAuthorIds.has(creator.user.id) }"
+              @click="handleToggleFollow(creator.user.id)"
+            >
+              {{ followingAuthorIds.has(creator.user.id) ? '已关注' : '关注' }}
+            </button>
           </article>
+          <p v-if="recommendedCreators.length === 0" class="feed-home__module-empty">推荐流加载后会展示适合关注的创作者</p>
         </div>
       </section>
 
       <section v-if="isForYouChannel" class="feed-home__right-card">
         <div class="feed-home__right-title">
           <strong>稍后再看</strong>
-          <button type="button">更多 <el-icon><ArrowRight /></el-icon></button>
+          <button type="button" @click="addWatchLater()">
+            添加 <el-icon><CirclePlus /></el-icon>
+          </button>
         </div>
         <div class="feed-home__watch-list">
-          <article v-for="item in watchLaterRows" :key="item.title">
+          <article v-for="item in watchLaterRows" :key="item.postId" @click="openWatchLater(item)">
             <img :src="item.image" alt="" />
             <span>
               <strong>{{ item.title }}</strong>
               <small>{{ item.meta }}</small>
             </span>
+            <button
+              v-if="watchLaterItems.some((saved) => saved.postId === item.postId)"
+              type="button"
+              aria-label="移除稍后再看"
+              @click.stop="removeWatchLater(item.postId)"
+            >
+              <el-icon><Close /></el-icon>
+            </button>
           </article>
+          <p v-if="watchLaterRows.length === 0" class="feed-home__module-empty">还没有可稍后再看的内容</p>
         </div>
       </section>
 
@@ -1637,6 +1870,25 @@ onUnmounted(() => {
         © 2024 Vibelo，连接每一种热爱
       </footer>
     </aside>
+
+    <el-dialog v-model="interestDialogVisible" class="feed-home__interest-dialog" title="编辑兴趣画像" width="520px">
+      <div class="feed-home__interest-picker">
+        <button
+          v-for="facet in interestCandidateFacets"
+          :key="`candidate-${interestKey(facet)}`"
+          type="button"
+          :class="{ 'is-selected': selectedInterestKeys.has(interestKey(facet)) }"
+          @click="toggleInterestFacet(facet)"
+        >
+          # {{ facet.facetLabel }}
+        </button>
+      </div>
+      <p class="feed-home__right-note">这些兴趣会写入账号画像，并影响“为你推荐”的召回和排序。</p>
+      <template #footer>
+        <el-button @click="interestDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="interestSaving" @click="saveInterestProfile">保存</el-button>
+      </template>
+    </el-dialog>
 
     <Transition name="feed-backtop">
       <button v-if="showBackTop" type="button" class="feed-home__backtop" title="回到顶部" aria-label="回到顶部"
@@ -1775,6 +2027,10 @@ onUnmounted(() => {
   color: #8a91a0;
   font-size: 12px;
   cursor: pointer;
+}
+
+.feed-home__right-title button:hover {
+  color: #ff5a45;
 }
 
 .feed-home__community-row {
@@ -2481,15 +2737,25 @@ onUnmounted(() => {
 }
 
 .feed-home__interest-profile button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   height: 30px;
   padding: 0 10px;
-  border: none;
+  border: 1px solid rgba(255, 90, 69, 0.13);
   border-radius: 8px;
-  background: #fff1ed;
+  background: linear-gradient(180deg, #fff7f5 0%, #fff 100%);
   color: #ff5a45;
   cursor: pointer;
   font-size: 12px;
   font-weight: 760;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+.feed-home__interest-profile button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 90, 69, 0.26);
+  box-shadow: 0 8px 18px rgba(255, 90, 69, 0.10);
 }
 
 .feed-home__right-note {
@@ -2511,16 +2777,32 @@ onUnmounted(() => {
   gap: 9px;
 }
 
+.feed-home__creator-list img,
+.feed-home__creator-list span,
+.feed-home__watch-list article {
+  cursor: pointer;
+}
+
 .feed-home__creator-list button {
   height: 30px;
   padding: 0 12px;
-  border: none;
+  border: 1px solid transparent;
   border-radius: 8px;
   background: #fff0ed;
   color: #ff4f3b;
   font-size: 13px;
   font-weight: 760;
   cursor: pointer;
+}
+
+.feed-home__creator-list button:hover {
+  box-shadow: 0 8px 18px rgba(255, 90, 69, 0.12);
+}
+
+.feed-home__creator-list button.is-following {
+  border-color: #dfe5ee;
+  background: #f7f8fa;
+  color: #687182;
 }
 
 .feed-home__live-card article {
@@ -2589,9 +2871,15 @@ onUnmounted(() => {
 
 .feed-home__watch-list article {
   display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
+  grid-template-columns: 72px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
+  border-radius: 8px;
+  transition: background 0.16s ease;
+}
+
+.feed-home__watch-list article:hover {
+  background: #f7f8fb;
 }
 
 .feed-home__watch-list img {
@@ -2619,6 +2907,55 @@ onUnmounted(() => {
 .feed-home__watch-list small {
   color: #8a91a0;
   font-size: 12px;
+}
+
+.feed-home__watch-list button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #9aa1ad;
+  cursor: pointer;
+}
+
+.feed-home__watch-list button:hover {
+  background: #fff1ed;
+  color: #ff5a45;
+}
+
+.feed-home__module-empty {
+  margin: 0;
+  color: #9aa1ad;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.feed-home__interest-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.feed-home__interest-picker button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #e6eaf1;
+  border-radius: 999px;
+  background: #fff;
+  color: #4f5868;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.feed-home__interest-picker button:hover,
+.feed-home__interest-picker button.is-selected {
+  border-color: #ffd1c8;
+  background: #fff1ed;
+  color: #ff4f3b;
 }
 
 .feed-home__footer-card {

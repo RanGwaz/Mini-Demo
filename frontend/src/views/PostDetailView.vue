@@ -80,7 +80,7 @@ const hasDetailMedia = computed(() => postAssets.value.length > 0)
 const isMetaScrollMode = computed(() => hasDetailMedia.value && typeof metaMaxHeight.value === 'number' && metaMaxHeight.value > 0)
 const metaScrollStyle = computed(() => {
   if (!isMetaScrollMode.value || !metaMaxHeight.value) return undefined
-  return { maxHeight: `${metaMaxHeight.value}px` }
+  return { height: `${metaMaxHeight.value}px`, maxHeight: `${metaMaxHeight.value}px` }
 })
 
 const activeCoverUrl = computed(() => {
@@ -243,6 +243,7 @@ function resetCommentState() {
   comments.value = []
   commentsPage.value = 1
   commentsHasMore.value = true
+  commentsLoading.value = false
 }
 
 function resetRelatedState() {
@@ -250,72 +251,87 @@ function resetRelatedState() {
   relatedPage.value = 1
   relatedHasMore.value = true
   relatedError.value = ''
+  relatedLoading.value = false
 }
 
-async function loadMoreComments() {
-  if (!post.value || commentsLoading.value || !commentsHasMore.value) return
+function isCurrentDetailRequest(targetPostId: number, requestId: number) {
+  return requestId === requestSerial && post.value?.id === targetPostId
+}
+
+async function loadMoreComments(targetPostId = post.value?.id, requestId = requestSerial) {
+  if (!targetPostId || commentsLoading.value || !commentsHasMore.value) return
   commentsLoading.value = true
   try {
     const page = commentsPage.value
-    const response = await api.commentsPage(post.value.id, page, COMMENT_PAGE_SIZE)
+    const response = await api.commentsPage(targetPostId, page, COMMENT_PAGE_SIZE)
+    if (!isCurrentDetailRequest(targetPostId, requestId)) return
     const known = new Set(comments.value.map((item) => item.id))
     const incoming = (response.records || []).filter((item) => !known.has(item.id))
     comments.value = [...comments.value, ...incoming]
     commentsPage.value = page + 1
     commentsHasMore.value = comments.value.length < response.total && incoming.length > 0
   } catch {
-    commentsHasMore.value = false
+    if (isCurrentDetailRequest(targetPostId, requestId)) commentsHasMore.value = false
   } finally {
-    commentsLoading.value = false
+    if (isCurrentDetailRequest(targetPostId, requestId)) commentsLoading.value = false
   }
 }
 
-async function loadMoreRelated() {
-  if (!post.value || relatedLoading.value || !relatedHasMore.value) return
+async function loadMoreRelated(targetPostId = post.value?.id, requestId = requestSerial) {
+  if (!targetPostId || relatedLoading.value || !relatedHasMore.value) return
   relatedLoading.value = true
   relatedError.value = ''
   try {
     const page = relatedPage.value
-    const response = await api.similarPosts(post.value.id, page, RELATED_PAGE_SIZE, undefined, authMode.value)
+    const response = await api.similarPosts(targetPostId, page, RELATED_PAGE_SIZE, undefined, authMode.value)
+    if (!isCurrentDetailRequest(targetPostId, requestId)) return
     const seen = new Set(relatedPosts.value.map((item) => item.id))
-    seen.add(post.value.id)
+    seen.add(targetPostId)
     const incoming = (response.records || []).filter((item) => !seen.has(item.id))
     relatedPosts.value = [...relatedPosts.value, ...incoming]
     relatedPage.value = page + 1
     relatedHasMore.value = relatedPosts.value.length < response.total && incoming.length > 0
   } catch (error) {
-    relatedError.value = error instanceof Error ? error.message : '加载更多内容失败'
+    if (isCurrentDetailRequest(targetPostId, requestId)) {
+      relatedError.value = error instanceof Error ? error.message : '加载更多内容失败'
+    }
   } finally {
-    relatedLoading.value = false
+    if (isCurrentDetailRequest(targetPostId, requestId)) relatedLoading.value = false
   }
 }
 
-async function ensureInteractionStatus(targetId: number) {
+async function ensureInteractionStatus(targetId: number, requestId = requestSerial) {
   if (!authStore.accessToken) {
-    liked.value = false
-    favorited.value = false
+    if (isCurrentDetailRequest(targetId, requestId)) {
+      liked.value = false
+      favorited.value = false
+    }
     return
   }
   try {
     const status = await api.interactionStatus(targetId)
+    if (!isCurrentDetailRequest(targetId, requestId)) return
     liked.value = status.liked
     favorited.value = status.favorited
   } catch {
-    liked.value = false
-    favorited.value = false
+    if (isCurrentDetailRequest(targetId, requestId)) {
+      liked.value = false
+      favorited.value = false
+    }
   }
 }
 
-async function ensureFollowStatus() {
-  if (!post.value || !authStore.accessToken || !canFollow.value) {
-    followingAuthor.value = false
+async function ensureFollowStatus(targetPost = post.value, requestId = requestSerial) {
+  if (!targetPost || !authStore.accessToken || !authStore.currentUser || authStore.currentUser.id === targetPost.author.id) {
+    if (targetPost && isCurrentDetailRequest(targetPost.id, requestId)) followingAuthor.value = false
     return
   }
   try {
-    const status = await api.followStatus(post.value.author.id)
+    const status = await api.followStatus(targetPost.author.id)
+    if (!isCurrentDetailRequest(targetPost.id, requestId)) return
     followingAuthor.value = status.following
   } catch {
-    followingAuthor.value = false
+    if (isCurrentDetailRequest(targetPost.id, requestId)) followingAuthor.value = false
   }
 }
 
@@ -431,6 +447,15 @@ function setupRelatedObserver() {
   relatedObserver.observe(target)
 }
 
+function loadDetailSideData(targetPost: PostView, requestId: number) {
+  void Promise.allSettled([
+    ensureInteractionStatus(targetPost.id, requestId),
+    ensureFollowStatus(targetPost, requestId),
+    loadMoreComments(targetPost.id, requestId),
+    loadMoreRelated(targetPost.id, requestId),
+  ])
+}
+
 async function loadDetail(targetId: number) {
   if (!Number.isFinite(targetId) || targetId <= 0) {
     detailError.value = '帖子不存在'
@@ -441,6 +466,9 @@ async function loadDetail(targetId: number) {
   detailLoading.value = true
   detailError.value = ''
   post.value = null
+  liked.value = false
+  favorited.value = false
+  followingAuthor.value = false
   activeAssetIndex.value = 0
   lightboxOpen.value = false
   resetCommentState()
@@ -450,15 +478,11 @@ async function loadDetail(targetId: number) {
     const detail = await api.postDetail(targetId, 'detail', authMode.value)
     if (requestId !== requestSerial) return
     post.value = detail
-    await Promise.all([
-      ensureInteractionStatus(targetId),
-      ensureFollowStatus(),
-      loadMoreComments(),
-      loadMoreRelated(),
-    ])
     await nextTick()
     syncMetaHeight()
     setupRelatedObserver()
+    detailLoading.value = false
+    loadDetailSideData(detail, requestId)
   } catch (error) {
     if (requestId !== requestSerial) return
     detailError.value = error instanceof HttpError ? error.message : '详情加载失败'
@@ -475,7 +499,7 @@ watch(() => route.params.id, async (value) => {
 
 watch(() => authStore.accessToken, async () => {
   if (!post.value) return
-  await Promise.all([ensureInteractionStatus(post.value.id), ensureFollowStatus()])
+  await Promise.all([ensureInteractionStatus(post.value.id), ensureFollowStatus(post.value)])
 })
 
 watch(() => hasDetailMedia.value, async () => {
@@ -569,7 +593,7 @@ onUnmounted(() => {
             <section class="detail-page__comments">
               <div class="detail-page__comments-head">
                 <strong>评论 ({{ post.commentCount }})</strong>
-                <button v-if="commentsHasMore" type="button" @click="loadMoreComments">
+                <button v-if="commentsHasMore" type="button" @click="loadMoreComments()">
                   查看全部
                   <el-icon><ArrowRight /></el-icon>
                 </button>
@@ -610,7 +634,7 @@ onUnmounted(() => {
       <section class="detail-page__related">
         <header class="detail-page__related-head">
           <h2>继续浏览</h2>
-          <button type="button" @click="loadMoreRelated">
+          <button type="button" @click="loadMoreRelated()">
             <el-icon><RefreshRight /></el-icon>
             换一换
           </button>
@@ -754,16 +778,19 @@ onUnmounted(() => {
 .detail-page__media-wrap {
   position: relative;
   overflow: hidden;
+  display: grid;
+  place-items: center;
+  height: clamp(520px, calc(100vh - 210px), 760px);
   border-radius: 12px;
   border: 1px solid #e7ebf0;
   background: #f2f4f8;
 }
 
 .detail-page__media-wrap img {
+  display: block;
   width: 100%;
-  height: auto;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
+  height: 100%;
+  object-fit: contain;
   cursor: zoom-in;
 }
 
@@ -879,7 +906,7 @@ onUnmounted(() => {
 }
 
 .detail-page__meta.is-scrollable {
-  overflow-y: auto;
+  overflow: hidden;
   padding-right: 6px;
   scrollbar-gutter: stable;
 }
@@ -1028,7 +1055,11 @@ onUnmounted(() => {
 }
 
 .detail-page__comments {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 8px;
   min-height: 0;
+  height: 100%;
 }
 
 .detail-page__comments-head {
@@ -1053,11 +1084,8 @@ onUnmounted(() => {
 }
 
 .detail-page__comments-list {
-  min-height: 72px;
-  max-height: 220px;
+  min-height: 0;
   overflow-y: auto;
-  margin-top: 8px;
-  margin-bottom: 9px;
   padding-right: 3px;
 }
 
@@ -1110,9 +1138,14 @@ onUnmounted(() => {
 }
 
 .detail-page__comment-editor {
+  position: sticky;
+  bottom: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 36px;
   gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #eceff4;
+  background: #fff;
 }
 
 .detail-page__comment-editor button {
@@ -1321,6 +1354,10 @@ onUnmounted(() => {
 
   .detail-page__content p {
     font-size: 14px;
+  }
+
+  .detail-page__media-wrap {
+    height: clamp(360px, 68vh, 620px);
   }
 
   .detail-page__panel.is-text-only .detail-page__content h1 {

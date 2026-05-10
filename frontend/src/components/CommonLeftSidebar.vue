@@ -3,16 +3,24 @@ import {
   ArrowRight,
   Brush,
   Camera,
+  ChatDotRound,
+  Compass,
+  Cpu,
+  Food,
   HomeFilled,
+  House,
+  MagicStick,
   Notebook,
   Opportunity,
+  Place,
+  Reading,
   School,
-  Star,
+  Suitcase,
   UserFilled,
 } from '@element-plus/icons-vue'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { contentChannels, type ContentChannelKey } from '../domain/contentTaxonomy'
+import { contentChannels } from '../domain/contentTaxonomy'
 import { api, type ChannelView } from '../services/api'
 
 const props = withDefaults(defineProps<{
@@ -24,12 +32,17 @@ const props = withDefaults(defineProps<{
 const router = useRouter()
 const route = useRoute()
 
-const channelIcons: Record<ContentChannelKey, typeof HomeFilled> = {
+const channelIcons: Record<string, typeof HomeFilled> = {
   campus: Notebook,
   anime_outfit: Brush,
   pet: Opportunity,
   photography: Camera,
   tech_moment: School,
+  overseas_life: Compass,
+  ai_tools: Cpu,
+  food_explore: Food,
+  weekend_trip: Suitcase,
+  home_life: House,
 }
 
 type SidebarChannel = {
@@ -55,14 +68,14 @@ const primaryNavItems = computed<NavItem[]>(() => [
     .map((channel) => ({
       key: channel.key,
       label: channel.label,
-      icon: channelIcons[channel.key as ContentChannelKey] || HomeFilled,
+      icon: resolveChannelIcon(channel.key, channel.label),
       path: `/channels/${channel.key}`,
     })),
 ])
 
 const bottomNavItems: NavItem[] = [
   { key: 'following', label: '关注', icon: UserFilled, query: { feed: 'following' } },
-  { key: 'friends', label: '朋友动态', icon: Star, query: { feed: 'friends' } },
+  { key: 'friends', label: '朋友动态', icon: ChatDotRound, query: { feed: 'friends' } },
 ]
 
 const audienceRows = computed(() => sidebarChannels.value.slice(2, 5))
@@ -88,6 +101,22 @@ function mapApiSidebarChannel(channel: ChannelView): SidebarChannel {
     signal: fallback?.signal || (channel.waterfall ? '瀑布流展示' : '专题流展示'),
     avatar: channel.icon || fallback?.avatar || `https://picsum.photos/seed/sidebar-${channel.code}/80/80`,
   }
+}
+
+function resolveChannelIcon(key: string, label = '') {
+  if (channelIcons[key]) return channelIcons[key]
+  if (label.includes('摄影')) return Camera
+  if (label.includes('校园')) return Notebook
+  if (label.includes('宠物') || label.includes('猫') || label.includes('狗')) return Opportunity
+  if (label.includes('二次元') || label.includes('穿搭')) return Brush
+  if (label.includes('AI') || label.includes('效率') || label.includes('工具')) return Cpu
+  if (label.includes('美食') || label.includes('探店')) return Food
+  if (label.includes('旅行') || label.includes('周末')) return Suitcase
+  if (label.includes('留学') || label.includes('海外')) return Compass
+  if (label.includes('家居') || label.includes('生活')) return House
+  if (label.includes('学习') || label.includes('读书')) return Reading
+  if (label.includes('地点') || label.includes('城市')) return Place
+  return MagicStick
 }
 
 async function loadSidebarChannels() {
@@ -210,10 +239,12 @@ function jumpToChannel(channel: string) {
   max-height: calc(100vh - 102px);
   overflow: hidden;
   padding: 10px 8px;
-  border: 1px solid rgba(26, 31, 44, 0.07);
+  border: 1px solid rgba(26, 31, 44, 0.08);
   border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 12px 28px rgba(32, 36, 47, 0.06);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 251, 253, 0.98)),
+    #fff;
+  box-shadow: 0 18px 42px rgba(32, 36, 47, 0.08);
 }
 
 .common-left-rail.is-fixed {
@@ -242,6 +273,7 @@ function jumpToChannel(channel: string) {
 }
 
 .common-left-rail__side-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -252,18 +284,42 @@ function jumpToChannel(channel: string) {
   font-size: 15px;
   font-weight: 650;
   text-align: left;
-  transition: background 0.16s ease, color 0.16s ease;
+  transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
 }
 
 .common-left-rail__side-item .el-icon {
   flex: 0 0 auto;
   font-size: 20px;
+  transition: transform 0.16s ease;
 }
 
 .common-left-rail__side-item:hover,
 .common-left-rail__side-item.is-active {
-  background: #fff0ed;
+  background:
+    linear-gradient(90deg, rgba(255, 90, 69, 0.13), rgba(255, 90, 69, 0.04)),
+    #fff;
   color: #ff5a45;
+  box-shadow: inset 0 0 0 1px rgba(255, 90, 69, 0.08);
+}
+
+.common-left-rail__side-item:hover {
+  transform: translateX(2px);
+}
+
+.common-left-rail__side-item:hover .el-icon,
+.common-left-rail__side-item.is-active .el-icon {
+  transform: scale(1.06);
+}
+
+.common-left-rail__side-item.is-active::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 999px;
+  background: #ff5a45;
 }
 
 .common-left-rail__community {
@@ -297,13 +353,24 @@ function jumpToChannel(channel: string) {
   cursor: pointer;
 }
 
+.common-left-rail__title button:hover {
+  color: #ff5a45;
+}
+
 .common-left-rail__community-row {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
   align-items: center;
   gap: 9px;
   padding: 8px 2px;
+  border-radius: 8px;
   text-align: left;
+  transition: background 0.16s ease, transform 0.16s ease;
+}
+
+.common-left-rail__community-row:hover {
+  background: #f7f8fb;
+  transform: translateX(2px);
 }
 
 .common-left-rail__community-row img {

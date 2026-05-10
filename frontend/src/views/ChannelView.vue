@@ -3,7 +3,7 @@ defineOptions({ name: 'ChannelView' })
 
 import { ArrowLeft, EditPen, RefreshRight } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import FeedCardRenderer from '../components/feed/FeedCardRenderer.vue'
 import { api, type ChannelView as ChannelInfo, type TopicView } from '../services/api'
@@ -23,22 +23,33 @@ const error = ref('')
 const page = ref(1)
 const total = ref(0)
 const sortMode = ref<SortMode>('hot')
+const selectedTopicSlug = ref('')
+const columnCount = ref(5)
 
 const channelCode = computed(() => String(route.params.code || ''))
 const hasMore = computed(() => posts.value.length < total.value)
 const channelTitle = computed(() => channel.value?.name || '频道')
 const channelDescription = computed(() => channel.value?.description || '正在生长的中文内容频道')
+const selectedTopicName = computed(() => topics.value.find((topic) => topic.slug === selectedTopicSlug.value)?.name || '')
+const masonryColumns = computed(() => distributeIntoColumns(posts.value))
 
 watch(channelCode, () => {
+  selectedTopicSlug.value = ''
   void loadChannelPage()
 })
 
-watch(sortMode, () => {
+watch([sortMode, selectedTopicSlug], () => {
   void loadPosts(true)
 })
 
 onMounted(() => {
+  updateColumnCount()
+  window.addEventListener('resize', updateColumnCount)
   void loadChannelPage()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', updateColumnCount)
 })
 
 function formatCount(value?: number | null) {
@@ -51,8 +62,65 @@ function openPost(post: PostView) {
   void router.push(`/posts/${post.id}`)
 }
 
-function openTopic(topic: TopicView) {
-  void router.push(`/topics/${topic.slug}`)
+function toggleTopicFilter(topic: TopicView) {
+  selectedTopicSlug.value = selectedTopicSlug.value === topic.slug ? '' : topic.slug
+}
+
+function clearTopicFilter() {
+  selectedTopicSlug.value = ''
+}
+
+function computeColumnCount() {
+  if (typeof window === 'undefined') return 5
+  const width = window.innerWidth
+  if (width >= 1680) return 6
+  if (width >= 1360) return 5
+  if (width >= 1080) return 4
+  if (width >= 780) return 3
+  if (width >= 540) return 2
+  return 1
+}
+
+function updateColumnCount() {
+  columnCount.value = computeColumnCount()
+}
+
+function currentColumnWidth() {
+  if (typeof window === 'undefined') return 252
+  const pageWidth = Math.min(window.innerWidth - 56, 1580)
+  const contentPadding = 32
+  const gapTotal = Math.max(0, columnCount.value - 1) * 14
+  return Math.max(180, (pageWidth - contentPadding - gapTotal) / Math.max(1, columnCount.value))
+}
+
+function estimatePostHeight(post: PostView) {
+  const width = currentColumnWidth()
+  const asset = post.assets?.[0] || post.images?.[0]
+  const assetWidth = Number(asset?.width || 0)
+  const assetHeight = Number(asset?.height || 0)
+  const ratio = assetWidth > 0 && assetHeight > 0
+    ? assetHeight / assetWidth
+    : 1.28 + (post.id % 5) * 0.18
+  const mediaHeight = asset ? Math.min(420, Math.max(132, width * ratio)) : 0
+  const titleLines = Math.min(2, Math.max(1, Math.ceil((post.title || '').length / 16)))
+  const contentLines = post.content ? Math.min(3, Math.ceil(post.content.length / 28)) : 0
+  const tagRows = Math.ceil(Math.min(post.tags?.length || 0, 4) / 3)
+  return mediaHeight + 88 + titleLines * 24 + contentLines * 20 + tagRows * 22
+}
+
+function distributeIntoColumns(items: PostView[]) {
+  const count = Math.max(1, columnCount.value)
+  const columns: PostView[][] = Array.from({ length: count }, () => [])
+  const heights = Array.from({ length: count }, () => 0)
+  for (const item of items) {
+    let targetIndex = 0
+    for (let i = 1; i < count; i++) {
+      if (heights[i] < heights[targetIndex]) targetIndex = i
+    }
+    columns[targetIndex].push(item)
+    heights[targetIndex] += estimatePostHeight(item)
+  }
+  return columns
 }
 
 async function loadChannelPage() {
@@ -82,7 +150,7 @@ async function loadPosts(reset = false) {
   }
   loadingMore.value = true
   try {
-    const data = await api.channelPosts(channelCode.value, page.value, 24, sortMode.value)
+    const data = await api.channelPosts(channelCode.value, page.value, 24, sortMode.value, selectedTopicSlug.value)
     total.value = Number(data.total || 0)
     posts.value = reset ? data.records : [...posts.value, ...data.records]
     page.value += 1
@@ -110,7 +178,7 @@ async function loadPosts(reset = false) {
         <p>{{ channelDescription }}</p>
         <div>
           <em>{{ formatCount(total) }} 篇内容</em>
-          <em>{{ topics.length }} 个话题</em>
+          <em>{{ topics.length }} 个标签</em>
         </div>
       </div>
       <button type="button" class="channel-page__publish" @click="router.push({ path: '/publish', query: { channel: channelCode } })">
@@ -122,23 +190,32 @@ async function loadPosts(reset = false) {
     <main class="channel-page__body">
       <section class="channel-page__topics">
         <div class="channel-page__section-head">
-          <h2>频道话题</h2>
+          <h2>频道标签</h2>
           <button type="button" @click="loadChannelPage">
             <el-icon><RefreshRight /></el-icon>
           </button>
         </div>
         <div class="channel-page__topic-row">
-          <button v-for="topic in topics" :key="topic.id" type="button" @click="openTopic(topic)">
+          <button
+            v-for="topic in topics"
+            :key="topic.id"
+            type="button"
+            :class="{ 'is-active': selectedTopicSlug === topic.slug }"
+            @click="toggleTopicFilter(topic)"
+          >
             <strong>#{{ topic.name }}</strong>
             <span>{{ formatCount(topic.postCount) }} 篇</span>
           </button>
-          <p v-if="!loading && topics.length === 0">这个频道还没有绑定话题</p>
+          <p v-if="!loading && topics.length === 0">这个频道还没有标签</p>
         </div>
       </section>
 
       <section class="channel-page__content">
         <div class="channel-page__section-head">
           <h2>频道内容</h2>
+          <button v-if="selectedTopicSlug" type="button" class="channel-page__filter-clear" @click="clearTopicFilter">
+            #{{ selectedTopicName }} ×
+          </button>
           <div class="channel-page__sort">
             <button type="button" :class="{ 'is-active': sortMode === 'hot' }" @click="sortMode = 'hot'">热门</button>
             <button type="button" :class="{ 'is-active': sortMode === 'latest' }" @click="sortMode = 'latest'">最新</button>
@@ -155,8 +232,10 @@ async function loadPosts(reset = false) {
         <div v-else-if="posts.length === 0" class="channel-page__state">
           <p>这个频道暂时还没有内容</p>
         </div>
-        <div v-else class="channel-page__grid">
-          <FeedCardRenderer v-for="post in posts" :key="post.id" :post="post" @open="openPost" />
+        <div v-else class="channel-page__waterfall" :style="{ '--column-count': String(columnCount) }">
+          <div v-for="(column, columnIndex) in masonryColumns" :key="`channel-col-${columnIndex}`" class="channel-page__column">
+            <FeedCardRenderer v-for="post in column" :key="post.id" :post="post" @open="openPost" />
+          </div>
         </div>
 
         <button v-if="hasMore" type="button" class="channel-page__more" :disabled="loadingMore" @click="loadPosts(false)">
@@ -169,8 +248,9 @@ async function loadPosts(reset = false) {
 
 <style scoped>
 .channel-page {
+  --channel-page-max-width: 1580px;
   min-height: calc(100vh - 74px);
-  padding: 18px 18px 48px;
+  padding: 18px clamp(14px, 2vw, 28px) 48px;
   color: #20242f;
   background: #f7f8fa;
 }
@@ -182,7 +262,8 @@ async function loadPosts(reset = false) {
 .channel-page__hero,
 .channel-page__topics,
 .channel-page__content {
-  max-width: 1180px;
+  width: 100%;
+  max-width: var(--channel-page-max-width);
   margin: 0 auto;
   border: 1px solid rgba(26, 31, 44, 0.07);
   border-radius: 8px;
@@ -328,9 +409,28 @@ async function loadPosts(reset = false) {
   text-align: left;
 }
 
+.channel-page__topic-row button.is-active {
+  border-color: rgba(255, 90, 69, 0.28);
+  background: #fff1ed;
+  color: #ff4f3b;
+}
+
 .channel-page__topic-row span {
   color: #8a91a0;
   font-size: 12px;
+}
+
+.channel-page__filter-clear {
+  height: 30px;
+  margin-left: auto;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 90, 69, 0.22);
+  border-radius: 999px;
+  background: #fff7f5;
+  color: #ff4f3b;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 760;
 }
 
 .channel-page__sort {
@@ -357,10 +457,18 @@ async function loadPosts(reset = false) {
   font-weight: 800;
 }
 
-.channel-page__grid {
+.channel-page__waterfall {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(236px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(var(--column-count), minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.channel-page__column {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
 }
 
 .channel-page__state {

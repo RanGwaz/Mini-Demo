@@ -11,7 +11,7 @@ import {
   UploadFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { channelConfig, defaultChannelConfig, resolveChannelCode } from '../config/channelConfig'
 import { defaultPublishChannelKey, publishChannels } from '../domain/contentTaxonomy'
@@ -25,6 +25,8 @@ const TITLE_LIMIT = 20
 const CONTENT_LIMIT = 1000
 const MAX_TOPICS_PER_POST = 7
 const RECOMMEND_TOPIC_LIMIT = 6
+const DRAFT_STORAGE_KEY = 'vibelo-publish-drafts'
+const DRAFT_AUTOSAVE_DELAY_MS = 700
 
 type CoverPreviewCard = {
   key: string
@@ -56,6 +58,17 @@ type SelectedTopic = {
   hotScore?: number
 }
 
+type PublishDraft = {
+  id: string
+  title: string
+  content: string
+  channel: string
+  topics: SelectedTopic[]
+  assets: UploadResponse[]
+  updatedAt: number
+  status: '编辑中' | '已保存'
+}
+
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
@@ -73,18 +86,17 @@ const quickTopics = ref<TopicView[]>([])
 const topicRecommendations = ref<TopicView[]>([])
 const publishChannelOptions = ref<PublishChannelOption[]>(publishChannels.map(mapStaticPublishChannel))
 const activeChannel = ref<string>(defaultPublishChannelKey)
+const drafts = ref<PublishDraft[]>([])
+const activeDraftId = ref('')
+const draftHydrated = ref(false)
+const autoSaving = ref(false)
 let topicSearchTimer: number | undefined
+let draftAutoSaveTimer: number | undefined
 
 const form = reactive({
   title: '',
   content: '',
 })
-
-const drafts = [
-  { title: '宿舍桌面改造记录', time: '今天 14:30', status: '编辑中', image: 'https://picsum.photos/seed/draft-dorm/120/90' },
-  { title: 'AI 学习流的三步法', time: '今天 10:12', status: '编辑中', image: 'https://picsum.photos/seed/draft-ai/120/90' },
-  { title: '校园晚饭打卡', time: '昨天 22:45', status: '已保存', image: 'https://picsum.photos/seed/draft-campus/120/90' },
-]
 
 const sampleCoverCards: CoverPreviewCard[] = [
   {
@@ -154,6 +166,12 @@ const topicCandidates = computed(() => {
 const displayQuickTopics = computed(() => quickTopics.value.slice(0, RECOMMEND_TOPIC_LIMIT))
 const quickTopicOverflow = computed(() => Math.max(0, quickTopics.value.length - RECOMMEND_TOPIC_LIMIT))
 const canPublish = computed(() => !loading.value && !uploading.value)
+const draftCount = computed(() => drafts.value.length)
+const autosaveText = computed(() => {
+  if (autoSaving.value || saving.value) return '草稿自动保存中'
+  if (drafts.value.length > 0) return '草稿已本地保存'
+  return '开始编辑后会自动保存'
+})
 
 const coverPreviewCards = computed<CoverPreviewCard[]>(() => [
   {
@@ -172,7 +190,12 @@ const coverPreviewCards = computed<CoverPreviewCard[]>(() => [
 ])
 
 onMounted(() => {
+  loadDrafts()
   void initializePublish()
+})
+
+onUnmounted(() => {
+  if (draftAutoSaveTimer) window.clearTimeout(draftAutoSaveTimer)
 })
 
 watch(activeChannel, () => {
@@ -190,6 +213,17 @@ watch(normalizedTopicKeyword, (keyword) => {
 watch(showTopicSearchPanel, (show) => {
   if (show) void loadTopicSuggestions(normalizedTopicKeyword.value)
 })
+
+watch(
+  [
+    () => form.title,
+    () => form.content,
+    activeChannel,
+    () => selectedTopics.value.map(topicKey).join('|'),
+    () => uploadedAssets.value.map((asset) => asset.objectKey || asset.fileUrl).join('|'),
+  ],
+  () => scheduleDraftAutosave(),
+)
 
 function resolveAssetCover(asset: UploadResponse) {
   return (asset.thumbUrl || asset.fileUrl).replace('http://localhost:9000', '/minio-img')
@@ -381,12 +415,137 @@ function openCoverEditor() {
   previewMode.value = 'cover'
 }
 
+function createDraftId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  return `draft-${Date.now()}-${Math.round(Math.random() * 1_000_000)}`
+}
+
+function hasDraftContent() {
+  return Boolean(
+    form.title.trim()
+    || form.content.trim()
+    || selectedTopics.value.length > 0
+    || uploadedAssets.value.length > 0,
+  )
+}
+
+function loadDrafts() {
+  try {
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEY)
+    const parsed = raw ? JSON.parse(raw) as PublishDraft[] : []
+    drafts.value = Array.isArray(parsed)
+      ? parsed.filter((draft) => draft?.id).sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0)).slice(0, 20)
+      : []
+  } catch {
+    drafts.value = []
+  } finally {
+    draftHydrated.value = true
+  }
+}
+
+function persistDrafts() {
+  localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(drafts.value.slice(0, 20)))
+}
+
+function buildCurrentDraft(status: PublishDraft['status']): PublishDraft {
+  return {
+    id: activeDraftId.value || createDraftId(),
+    title: form.title.trim(),
+    content: form.content,
+    channel: activeChannel.value,
+    topics: selectedTopics.value.map((topic) => ({ ...topic })),
+    assets: uploadedAssets.value.map((asset) => ({ ...asset })),
+    updatedAt: Date.now(),
+    status,
+  }
+}
+
+function upsertCurrentDraft(status: PublishDraft['status']) {
+  if (!draftHydrated.value || !hasDraftContent()) return false
+  const draft = buildCurrentDraft(status)
+  activeDraftId.value = draft.id
+  drafts.value = [draft, ...drafts.value.filter((item) => item.id !== draft.id)]
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, 20)
+  persistDrafts()
+  return true
+}
+
+function scheduleDraftAutosave() {
+  if (!draftHydrated.value) return
+  if (draftAutoSaveTimer) window.clearTimeout(draftAutoSaveTimer)
+  if (!hasDraftContent()) {
+    autoSaving.value = false
+    return
+  }
+  autoSaving.value = true
+  draftAutoSaveTimer = window.setTimeout(() => {
+    upsertCurrentDraft('编辑中')
+    autoSaving.value = false
+  }, DRAFT_AUTOSAVE_DELAY_MS)
+}
+
 function saveDraft() {
   saving.value = true
   window.setTimeout(() => {
+    const saved = upsertCurrentDraft('已保存')
     saving.value = false
-    ElMessage.success('草稿已保存')
+    if (saved) ElMessage.success('草稿已保存')
+    else ElMessage.info('先写点内容或上传图片再保存草稿')
   }, 450)
+}
+
+function restoreDraft(draft: PublishDraft) {
+  activeDraftId.value = draft.id
+  form.title = draft.title || ''
+  form.content = draft.content || ''
+  activeChannel.value = draft.channel || defaultPublishChannelKey
+  selectedTopics.value = (draft.topics || []).map((topic) => ({ ...topic }))
+  uploadedAssets.value = (draft.assets || []).map((asset) => ({ ...asset }))
+  previewMode.value = uploadedAssets.value.length > 0 ? 'cover' : 'note'
+  ElMessage.success('已恢复草稿')
+}
+
+function newDraft() {
+  if (hasDraftContent()) upsertCurrentDraft('编辑中')
+  activeDraftId.value = ''
+  form.title = ''
+  form.content = ''
+  activeChannel.value = defaultPublishChannelKey
+  selectedTopics.value = []
+  uploadedAssets.value = []
+  topicInput.value = ''
+  previewMode.value = 'note'
+}
+
+function deleteDraft(id: string) {
+  drafts.value = drafts.value.filter((draft) => draft.id !== id)
+  if (activeDraftId.value === id) activeDraftId.value = ''
+  persistDrafts()
+}
+
+function clearDrafts() {
+  drafts.value = []
+  activeDraftId.value = ''
+  persistDrafts()
+  ElMessage.success('草稿箱已清空')
+}
+
+function draftTitle(draft: PublishDraft) {
+  return draft.title || draft.content.trim().slice(0, 18) || '无标题草稿'
+}
+
+function draftImage(draft: PublishDraft) {
+  const asset = draft.assets?.[0]
+  return (asset?.thumbUrl || asset?.fileUrl || '/auto_picture.png').replace('http://localhost:9000', '/minio-img')
+}
+
+function draftTime(draft: PublishDraft) {
+  const diff = Date.now() - Number(draft.updatedAt || Date.now())
+  if (diff < 60_000) return '刚刚'
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
+  return `${Math.floor(diff / 86_400_000)} 天前`
 }
 
 function uniqueTopics(topics: string[]) {
@@ -448,6 +607,7 @@ async function submit() {
     }
 
     await api.createPost(payload)
+    if (activeDraftId.value) deleteDraft(activeDraftId.value)
     sessionStorage.setItem('image-social-feed-need-refresh', '1')
     ElMessage.success('发布成功')
     void router.push('/feed')
@@ -464,18 +624,27 @@ async function submit() {
     <aside class="publish-studio__left">
       <section class="publish-studio__side-card publish-studio__draft-card">
         <div class="publish-studio__side-title">
-          <strong>草稿箱 <em>(3)</em></strong>
-          <button type="button">管理</button>
+          <strong>草稿箱 <em>({{ draftCount }})</em></strong>
+          <button type="button" :disabled="draftCount === 0" @click="clearDrafts">清空</button>
         </div>
-        <article v-for="draft in drafts" :key="draft.title">
-          <img :src="draft.image" alt="" />
+        <article
+          v-for="draft in drafts"
+          :key="draft.id"
+          :class="{ 'is-active': activeDraftId === draft.id }"
+          @click="restoreDraft(draft)"
+        >
+          <img :src="draftImage(draft)" alt="" />
           <span>
-            <strong>{{ draft.title }}</strong>
-            <small>{{ draft.time }}</small>
+            <strong>{{ draftTitle(draft) }}</strong>
+            <small>{{ draftTime(draft) }}</small>
           </span>
           <em :class="{ 'is-saved': draft.status === '已保存' }">{{ draft.status }}</em>
+          <button type="button" class="publish-studio__draft-delete" aria-label="删除草稿" @click.stop="deleteDraft(draft.id)">
+            <el-icon><Close /></el-icon>
+          </button>
         </article>
-        <button type="button" class="publish-studio__new-draft">
+        <p v-if="draftCount === 0" class="publish-studio__draft-empty">还没有草稿，编辑内容后会自动保存。</p>
+        <button type="button" class="publish-studio__new-draft" @click="newDraft">
           <el-icon><Plus /></el-icon>
           新建草稿
         </button>
@@ -483,7 +652,7 @@ async function submit() {
 
       <footer class="publish-studio__autosave">
         <el-icon><CircleCheck /></el-icon>
-        草稿自动保存中
+        {{ autosaveText }}
       </footer>
     </aside>
 
@@ -832,12 +1001,27 @@ async function submit() {
   font-size: 12px;
 }
 
+.publish-studio__side-title button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .publish-studio__draft-card article {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
+  grid-template-columns: 42px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 9px;
   margin-top: 12px;
+  padding: 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.publish-studio__draft-card article:hover,
+.publish-studio__draft-card article.is-active {
+  background: #fff7f5;
+  box-shadow: inset 0 0 0 1px rgba(255, 90, 69, 0.12);
 }
 
 .publish-studio__draft-card article img {
@@ -875,6 +1059,30 @@ async function submit() {
 
 .publish-studio__draft-card article em.is-saved {
   color: #35b56a;
+}
+
+.publish-studio__draft-delete {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: #a1a9b6;
+  cursor: pointer;
+}
+
+.publish-studio__draft-delete:hover {
+  background: #ffece8;
+  color: #ff5a45;
+}
+
+.publish-studio__draft-empty {
+  margin: 14px 2px 0;
+  color: #98a1af;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .publish-studio__new-draft {

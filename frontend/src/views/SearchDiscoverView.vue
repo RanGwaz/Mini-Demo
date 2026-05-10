@@ -95,11 +95,11 @@ async function runSearch() {
     <header class="search-page__head">
       <form class="search-page__search" @submit.prevent="submitSearch">
         <el-icon><Search /></el-icon>
-        <input v-model="keyword" type="search" placeholder="搜索笔记、用户、话题、频道" />
+        <input v-model="keyword" type="search" placeholder="搜索笔记、用户、标签、频道" />
         <button type="submit">搜索</button>
       </form>
       <p v-if="trimmedKeyword">搜索 “{{ trimmedKeyword }}”</p>
-      <p v-else>输入关键词发现内容、用户、话题和频道</p>
+      <p v-else>输入关键词发现内容、用户、标签和频道</p>
     </header>
 
     <main class="search-page__body">
@@ -131,10 +131,10 @@ async function runSearch() {
 
         <section v-if="result.topics.length > 0" class="search-page__section">
           <div class="search-page__section-head">
-            <h2>话题</h2>
+            <h2>标签</h2>
           </div>
           <div class="search-page__topic-row">
-            <button v-for="topic in result.topics" :key="topic.id" type="button" @click="router.push(`/topics/${topic.slug}`)">
+            <button v-for="topic in result.topics" :key="topic.id" type="button" @click="router.push({ path: '/search', query: { q: topic.name } })">
               <strong>#{{ topic.name }}</strong>
               <span>{{ formatCount(topic.postCount) }} 篇内容</span>
             </button>
