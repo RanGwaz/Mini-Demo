@@ -16,6 +16,7 @@ export interface UserSummary {
   avatarUrl?: string
   backgroundUrl?: string
   bio?: string
+  roles?: string
   phoneHash?: string
   lastLoginAt?: string
 }
@@ -102,6 +103,25 @@ export interface PostView {
 export interface SearchResult {
   users: UserSummary[]
   posts: PostView[]
+  topics: {
+    id: number
+    name: string
+    slug: string
+    description?: string
+    coverUrl?: string
+    postCount?: number
+    followerCount?: number
+    hotScore?: number
+  }[]
+  channels: {
+    code: string
+    name: string
+    description?: string
+    icon?: string
+    sortOrder?: number
+    postType?: string
+    waterfall?: boolean
+  }[]
 }
 
 export interface CommentView {

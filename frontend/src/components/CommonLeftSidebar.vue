@@ -10,8 +10,10 @@ import {
   Star,
   UserFilled,
 } from '@element-plus/icons-vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { contentChannels, type ContentChannelKey } from '../domain/contentTaxonomy'
+import { api, type ChannelView } from '../services/api'
 
 const props = withDefaults(defineProps<{
   fixed?: boolean
@@ -30,30 +32,76 @@ const channelIcons: Record<ContentChannelKey, typeof HomeFilled> = {
   tech_moment: School,
 }
 
+type SidebarChannel = {
+  key: string
+  label: string
+  signal: string
+  avatar: string
+}
+
 type NavItem = {
   key: string
   label: string
   icon: typeof HomeFilled
-  query: { feed?: string; channel?: string }
+  query?: { feed?: string }
+  path?: string
 }
 
-const primaryNavItems: NavItem[] = [
+const sidebarChannels = ref<SidebarChannel[]>(contentChannels.map(mapStaticSidebarChannel))
+
+const primaryNavItems = computed<NavItem[]>(() => [
   { key: 'recommend', label: '为你推荐', icon: HomeFilled, query: { feed: 'recommend' } },
-  ...contentChannels
+  ...sidebarChannels.value
     .map((channel) => ({
       key: channel.key,
       label: channel.label,
-      icon: channelIcons[channel.key],
-      query: { channel: channel.key },
+      icon: channelIcons[channel.key as ContentChannelKey] || HomeFilled,
+      path: `/channels/${channel.key}`,
     })),
-]
+])
 
 const bottomNavItems: NavItem[] = [
   { key: 'following', label: '关注', icon: UserFilled, query: { feed: 'following' } },
   { key: 'friends', label: '朋友动态', icon: Star, query: { feed: 'friends' } },
 ]
 
-const audienceRows = contentChannels.slice(2, 5)
+const audienceRows = computed(() => sidebarChannels.value.slice(2, 5))
+
+onMounted(() => {
+  void loadSidebarChannels()
+})
+
+function mapStaticSidebarChannel(channel: (typeof contentChannels)[number]): SidebarChannel {
+  return {
+    key: channel.key,
+    label: channel.label,
+    signal: channel.signal,
+    avatar: channel.avatar,
+  }
+}
+
+function mapApiSidebarChannel(channel: ChannelView): SidebarChannel {
+  const fallback = contentChannels.find((item) => item.key === channel.code)
+  return {
+    key: channel.code,
+    label: channel.name,
+    signal: fallback?.signal || (channel.waterfall ? '瀑布流展示' : '专题流展示'),
+    avatar: channel.icon || fallback?.avatar || `https://picsum.photos/seed/sidebar-${channel.code}/80/80`,
+  }
+}
+
+async function loadSidebarChannels() {
+  try {
+    const channels = await api.channels()
+    const next = channels
+      .filter((item) => item.code && item.name)
+      .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+      .map(mapApiSidebarChannel)
+    if (next.length > 0) sidebarChannels.value = next
+  } catch {
+    sidebarChannels.value = contentChannels.map(mapStaticSidebarChannel)
+  }
+}
 
 function routeQueryValue(value: unknown) {
   if (Array.isArray(value)) return value[0] || ''
@@ -66,19 +114,17 @@ function feedHomePath() {
 
 function navQuery(item: NavItem) {
   const query: Record<string, string> = {}
-  const feed = item.query.feed
-  const channel = item.query.channel
+  const feed = item.query?.feed
   if (feed && feed !== 'recommend') query.feed = feed
-  if (channel && channel !== 'all') query.channel = channel
   return query
 }
 
 function isActive(item: NavItem) {
+  if (item.path) return route.path === item.path
   if (!(route.path === '/feed' || route.path === '/home' || route.path.startsWith('/posts/'))) return false
   const currentFeed = routeQueryValue(route.query.feed) || 'recommend'
   const currentChannel = routeQueryValue(route.query.channel) || 'all'
-  if (item.query.feed) return currentChannel === 'all' && currentFeed === item.query.feed
-  if (item.query.channel) return currentChannel === item.query.channel
+  if (item.query?.feed) return currentChannel === 'all' && currentFeed === item.query.feed
   return false
 }
 
@@ -87,11 +133,15 @@ function handleNav(item: NavItem) {
     window.scrollTo({ top: 0, behavior: 'smooth' })
     return
   }
+  if (item.path) {
+    void router.push(item.path)
+    return
+  }
   void router.push({ path: feedHomePath(), query: navQuery(item) })
 }
 
 function jumpToChannel(channel: string) {
-  void router.push({ path: feedHomePath(), query: { channel } })
+  void router.push(`/channels/${channel}`)
 }
 </script>
 

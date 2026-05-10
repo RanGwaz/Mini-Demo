@@ -92,7 +92,8 @@ public class UserService {
                 user.getNickname(),
                 user.getAvatarUrl(),
                 user.getBackgroundUrl(),
-                user.getBio());
+                user.getBio(),
+                user.getRoles());
     }
 
     public UserSummary summaryOrPlaceholder(Long userId) {
@@ -102,6 +103,7 @@ public class UserService {
                     "unknown",
                     null,
                     "账号已注销",
+                    null,
                     null,
                     null,
                     null
@@ -115,6 +117,7 @@ public class UserService {
                     "user_" + userId,
                     null,
                     "账号已注销",
+                    null,
                     null,
                     null,
                     null

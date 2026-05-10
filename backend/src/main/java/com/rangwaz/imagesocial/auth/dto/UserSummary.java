@@ -11,5 +11,6 @@ public record UserSummary(
         String nickname,
         String avatarUrl,
         String backgroundUrl,
-        String bio) {
+        String bio,
+        String roles) {
 }

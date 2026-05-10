@@ -9,6 +9,7 @@ import com.rangwaz.imagesocial.feed.DeepRankingService;
 import com.rangwaz.imagesocial.feed.FallbackTopicFacetRow;
 import com.rangwaz.imagesocial.feed.FeedFilterService;
 import com.rangwaz.imagesocial.feed.FeedQuotaGuardService;
+import com.rangwaz.imagesocial.feed.FeedObservabilityService;
 import com.rangwaz.imagesocial.feed.FeedRecallService;
 import com.rangwaz.imagesocial.feed.FeedSourceHealthTrackerService;
 import com.rangwaz.imagesocial.feed.RankedPost;
@@ -119,6 +120,7 @@ public class FeedServiceImpl implements FeedService {
     private final UserInterestService userInterestService;
     private final RecommendationProperties recommendationProperties;
     private final FeedQuotaGuardService feedQuotaGuardService;
+    private final FeedObservabilityService feedObservabilityService;
     private final FeedSourceHealthTrackerService feedSourceHealthTrackerService;
 
     @Autowired
@@ -134,6 +136,7 @@ public class FeedServiceImpl implements FeedService {
                            UserInterestService userInterestService,
                            RecommendationProperties recommendationProperties,
                            FeedQuotaGuardService feedQuotaGuardService,
+                           FeedObservabilityService feedObservabilityService,
                            FeedSourceHealthTrackerService feedSourceHealthTrackerService) {
         this.recallService = recallService;
         this.filterService = filterService;
@@ -147,6 +150,7 @@ public class FeedServiceImpl implements FeedService {
         this.userInterestService = userInterestService;
         this.recommendationProperties = recommendationProperties;
         this.feedQuotaGuardService = feedQuotaGuardService;
+        this.feedObservabilityService = feedObservabilityService;
         this.feedSourceHealthTrackerService = feedSourceHealthTrackerService;
     }
 
@@ -202,6 +206,7 @@ public class FeedServiceImpl implements FeedService {
                                                 String tagFilter,
                                                 boolean publishExposure,
                                                 boolean includeDiagnostics) {
+        long traceStartedAt = System.nanoTime();
         int safePage = Math.max(1, page);
         int safeSize = Math.min(100, Math.max(1, size));
         int recallMultiplier = safePage <= 1 ? 3 : 2;
@@ -621,6 +626,34 @@ public class FeedServiceImpl implements FeedService {
                         )
                 );
             }
+        }
+        if (publishExposure) {
+            Map<String, Object> traceFilters = new LinkedHashMap<>();
+            if (topicFilter != null && !topicFilter.isBlank()) {
+                traceFilters.put("topic", topicFilter);
+            }
+            if (styleFilter != null && !styleFilter.isBlank()) {
+                traceFilters.put("style", styleFilter);
+            }
+            if (tagFilter != null && !tagFilter.isBlank()) {
+                traceFilters.put("tag", tagFilter);
+            }
+            feedObservabilityService.recordHomeFeed(new FeedObservabilityService.HomeFeedTrace(
+                    effectiveSeed,
+                    currentUserId,
+                    "home_feed",
+                    safePage,
+                    safeSize,
+                    seed,
+                    traceFilters,
+                    quotaExperiment.experimentId(),
+                    quotaExperiment.bucket(),
+                    total,
+                    fromIndex,
+                    pageItems,
+                    Duration.ofNanos(System.nanoTime() - traceStartedAt),
+                    false
+            ));
         }
         FeedHomeDiagnosticsResponse diagnosticsResponse = diagnostics == null
                 ? null

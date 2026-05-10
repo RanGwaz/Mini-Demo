@@ -55,12 +55,15 @@ public class SecurityConfig {
                         .requestMatchers(PUBLIC_PATHS.toArray(String[]::new)).permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers(HttpMethod.GET,
+                                "/api/feed",
                                 "/api/feed/home",
                                 "/api/feed/home/diagnostics",
                                 "/api/feed/facets",
                                 "/api/feed/health/sources",
                                 "/api/feed/metrics/online",
                                 "/api/feed/posts/*/similar",
+                                "/api/channels/**",
+                                "/api/topics/**",
                                 "/api/posts/**",
                                 "/api/taxonomy/**",
                                 "/api/search/**")

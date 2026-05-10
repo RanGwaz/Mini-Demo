@@ -24,7 +24,7 @@ export interface ContentChannelDefinition {
 }
 
 export interface FeedChannelDefinition extends Omit<ContentChannelDefinition, 'key' | 'topicPath' | 'avatar'> {
-  key: FeedChannelKey
+  key: string
   topicPath?: string
   avatar?: string
 }

@@ -12,10 +12,10 @@ import {
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import { channelConfig } from '../config/channelConfig'
-import { defaultPublishChannelKey, publishChannels, type PublishChannelKey } from '../domain/contentTaxonomy'
-import { api, type CreatePostAssetPayload, type PublishTagSuggestion } from '../services/api'
+import { useRoute, useRouter } from 'vue-router'
+import { channelConfig, defaultChannelConfig, resolveChannelCode } from '../config/channelConfig'
+import { defaultPublishChannelKey, publishChannels } from '../domain/contentTaxonomy'
+import { api, type ChannelView, type CreatePostAssetPayload, type TopicView } from '../services/api'
 import { useAuthStore } from '../stores/auth'
 import type { UploadResponse } from '../types'
 
@@ -39,7 +39,25 @@ type CoverPreviewCard = {
   topic: string
 }
 
+type PublishChannelOption = {
+  key: string
+  label: string
+  desc: string
+  signal: string
+  postType: string
+  waterfall: boolean
+}
+
+type SelectedTopic = {
+  id?: number
+  name: string
+  slug?: string
+  postCount?: number
+  hotScore?: number
+}
+
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 authStore.hydrate()
 
@@ -49,11 +67,12 @@ const uploading = ref(false)
 const topicLoading = ref(false)
 const previewMode = ref<PreviewMode>('note')
 const uploadedAssets = ref<UploadResponse[]>([])
-const selectedTopics = ref<string[]>([])
+const selectedTopics = ref<SelectedTopic[]>([])
 const topicInput = ref('')
-const quickTopics = ref<string[]>([])
-const topicRecommendations = ref<PublishTagSuggestion[]>([])
-const activeChannel = ref<PublishChannelKey>(defaultPublishChannelKey)
+const quickTopics = ref<TopicView[]>([])
+const topicRecommendations = ref<TopicView[]>([])
+const publishChannelOptions = ref<PublishChannelOption[]>(publishChannels.map(mapStaticPublishChannel))
+const activeChannel = ref<string>(defaultPublishChannelKey)
 let topicSearchTimer: number | undefined
 
 const form = reactive({
@@ -108,8 +127,12 @@ const sampleCoverCards: CoverPreviewCard[] = [
 
 const titleCount = computed(() => form.title.length)
 const contentCount = computed(() => form.content.length)
-const currentChannelLabel = computed(() => publishChannels.find((item) => item.key === activeChannel.value)?.label || publishChannels[0]?.label || '')
-const currentPostType = computed(() => channelConfig[activeChannel.value].postType)
+const currentChannel = computed(() => (
+  publishChannelOptions.value.find((item) => item.key === activeChannel.value)
+  || publishChannelOptions.value[0]
+))
+const currentChannelLabel = computed(() => currentChannel.value?.label || '')
+const currentPostType = computed(() => currentChannel.value?.postType || defaultChannelConfig.postType)
 const currentUserName = computed(() => authStore.currentUser?.nickname || 'Vibelo 用户')
 const currentUserAvatar = computed(() => authStore.currentUser?.avatarUrl || 'https://api.dicebear.com/9.x/adventurer/svg?seed=creator')
 const hasImages = computed(() => uploadedAssets.value.length > 0)
@@ -117,12 +140,12 @@ const coverAsset = computed(() => uploadedAssets.value[0] || null)
 const currentCover = computed(() => coverAsset.value ? resolveAssetCover(coverAsset.value) : '')
 const previewParagraphs = computed(() => form.content.split('\n').map((line) => line.trim()).filter(Boolean).slice(0, 5))
 const previewTopicList = computed(() => {
-  if (selectedTopics.value.length > 0) return selectedTopics.value.slice(0, 4).map((item) => `#${item}`)
+  if (selectedTopics.value.length > 0) return selectedTopics.value.slice(0, 4).map((item) => `#${item.name}`)
   return ['#发现灵感', '#校园生活']
 })
 const currentPreviewTopic = computed(() => previewTopicList.value[0] || '#发现灵感')
 const normalizedTopicKeyword = computed(() => topicInput.value.trim().replace(/^#+/, '').replace(/\s+/g, ''))
-const showTopicSearchPanel = computed(() => topicInput.value.trim().startsWith('#'))
+const showTopicSearchPanel = computed(() => normalizedTopicKeyword.value.length > 0)
 const topicCandidates = computed(() => {
   const keyword = normalizedTopicKeyword.value
   if (!keyword) return topicRecommendations.value
@@ -149,51 +172,155 @@ const coverPreviewCards = computed<CoverPreviewCard[]>(() => [
 ])
 
 onMounted(() => {
-  void loadPublishSuggestions()
+  void initializePublish()
 })
 
 watch(activeChannel, () => {
-  void loadPublishSuggestions()
+  void loadTopicSuggestions()
 })
 
 watch(normalizedTopicKeyword, (keyword) => {
   if (!showTopicSearchPanel.value) return
   if (topicSearchTimer) window.clearTimeout(topicSearchTimer)
   topicSearchTimer = window.setTimeout(() => {
-    void loadPublishSuggestions(keyword)
+    void loadTopicSuggestions(keyword)
   }, 200)
 })
 
 watch(showTopicSearchPanel, (show) => {
-  if (show) void loadPublishSuggestions(normalizedTopicKeyword.value)
+  if (show) void loadTopicSuggestions(normalizedTopicKeyword.value)
 })
 
 function resolveAssetCover(asset: UploadResponse) {
   return (asset.thumbUrl || asset.fileUrl).replace('http://localhost:9000', '/minio-img')
 }
 
+async function initializePublish() {
+  await loadPublishChannels()
+  applyRoutePublishHints()
+  await loadTopicSuggestions()
+}
+
+function routeQueryValue(value: unknown) {
+  if (Array.isArray(value)) return value[0] || ''
+  return typeof value === 'string' ? value : ''
+}
+
+function applyRoutePublishHints() {
+  const channelHint = routeQueryValue(route.query.channel)
+  if (channelHint && publishChannelOptions.value.some((item) => item.key === channelHint)) {
+    activeChannel.value = channelHint
+  }
+  const topicHint = routeQueryValue(route.query.topic)
+  if (topicHint) addTopic(topicHint)
+}
+
+function resolvePublishPostType(code: string, fallback?: string) {
+  const resolvedCode = resolveChannelCode(code)
+  if (resolvedCode) return channelConfig[resolvedCode].postType
+  return fallback || defaultChannelConfig.postType
+}
+
+function mapStaticPublishChannel(channel: (typeof publishChannels)[number]): PublishChannelOption {
+  return {
+    key: channel.key,
+    label: channel.label,
+    desc: channel.desc,
+    signal: channel.signal,
+    postType: resolvePublishPostType(channel.key, channel.postType),
+    waterfall: channel.waterfall,
+  }
+}
+
+function mapApiPublishChannel(channel: ChannelView): PublishChannelOption {
+  return {
+    key: channel.code,
+    label: channel.name,
+    desc: channel.description || '正在生长的内容频道',
+    signal: channel.waterfall ? '瀑布流展示' : '专题流展示',
+    postType: resolvePublishPostType(channel.code, channel.postType),
+    waterfall: channel.waterfall,
+  }
+}
+
 function normalizeTopic(raw: string) {
   return raw.trim().replace(/^#+/, '').replace(/\s+/g, '')
 }
 
-async function loadPublishSuggestions(keyword = '') {
+function topicKey(topic: SelectedTopic | TopicView) {
+  return topic.id ? `id:${topic.id}` : `name:${normalizeTopic(topic.name)}`
+}
+
+function findKnownTopic(name: string) {
+  const normalized = normalizeTopic(name)
+  return [...topicRecommendations.value, ...quickTopics.value]
+    .find((item) => normalizeTopic(item.name) === normalized)
+}
+
+function toSelectedTopic(raw: string | TopicView): SelectedTopic | null {
+  if (typeof raw !== 'string') {
+    return {
+      id: raw.id,
+      name: normalizeTopic(raw.name),
+      slug: raw.slug,
+      postCount: raw.postCount,
+      hotScore: raw.hotScore,
+    }
+  }
+  const normalized = normalizeTopic(raw)
+  if (!normalized) return null
+  const known = findKnownTopic(normalized)
+  if (known) return toSelectedTopic(known)
+  return { name: normalized }
+}
+
+function formatTopicHeat(topic: TopicView) {
+  const postCount = Number(topic.postCount || 0)
+  if (postCount >= 10000) return `${(postCount / 10000).toFixed(1)}万篇`
+  if (postCount > 0) return `${postCount}篇`
+  const hotScore = Number(topic.hotScore || 0)
+  if (hotScore > 0) return `热度 ${Math.round(hotScore)}`
+  return '新话题'
+}
+
+async function loadPublishChannels() {
+  try {
+    const channels = await api.channels()
+    const next = channels
+      .filter((item) => item.code && item.name)
+      .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+      .map(mapApiPublishChannel)
+    if (next.length === 0) return
+    publishChannelOptions.value = next
+    if (!next.some((item) => item.key === activeChannel.value)) {
+      activeChannel.value = next.find((item) => item.key === defaultPublishChannelKey)?.key || next[0].key
+    }
+  } catch {
+    publishChannelOptions.value = publishChannels.map(mapStaticPublishChannel)
+  }
+}
+
+async function loadTopicSuggestions(keyword = '') {
   topicLoading.value = true
   try {
-    const response = await api.publishSuggestions(activeChannel.value, keyword)
-    quickTopics.value = response.quickTags || []
-    topicRecommendations.value = response.trendingTags || []
+    const normalizedKeyword = normalizeTopic(keyword)
+    const topics = normalizedKeyword
+      ? await api.searchTopics(normalizedKeyword, 20)
+      : await api.trendingTopics(20)
+    topicRecommendations.value = topics
+    if (!normalizedKeyword) quickTopics.value = topics
   } catch {
-    quickTopics.value = []
+    if (!keyword) quickTopics.value = []
     topicRecommendations.value = []
   } finally {
     topicLoading.value = false
   }
 }
 
-function addTopic(raw: string) {
-  const normalized = normalizeTopic(raw)
-  if (!normalized) return
-  if (selectedTopics.value.includes(normalized)) {
+function addTopic(raw: string | TopicView) {
+  const topic = toSelectedTopic(raw)
+  if (!topic) return
+  if (selectedTopics.value.some((item) => topicKey(item) === topicKey(topic))) {
     topicInput.value = ''
     return
   }
@@ -201,7 +328,7 @@ function addTopic(raw: string) {
     ElMessage.info(`最多添加 ${MAX_TOPICS_PER_POST} 个话题`)
     return
   }
-  selectedTopics.value = [...selectedTopics.value, normalized]
+  selectedTopics.value = [...selectedTopics.value, topic]
   topicInput.value = ''
 }
 
@@ -210,11 +337,11 @@ function addTopicFromInput() {
   addTopic(normalizedTopicKeyword.value)
 }
 
-function removeTopic(topic: string) {
-  selectedTopics.value = selectedTopics.value.filter((item) => item !== topic)
+function removeTopic(topic: SelectedTopic) {
+  selectedTopics.value = selectedTopics.value.filter((item) => topicKey(item) !== topicKey(topic))
 }
 
-function selectPublishChannel(channelKey: PublishChannelKey) {
+function selectPublishChannel(channelKey: string) {
   if (activeChannel.value === channelKey) return
   activeChannel.value = channelKey
 }
@@ -289,7 +416,11 @@ function toAssetsPayload(): CreatePostAssetPayload[] {
 async function submit() {
   loading.value = true
   try {
-    const finalTopics = uniqueTopics(selectedTopics.value).slice(0, MAX_TOPICS_PER_POST)
+    const finalTopics = uniqueTopics(selectedTopics.value.map((topic) => topic.name)).slice(0, MAX_TOPICS_PER_POST)
+    const topicIds = selectedTopics.value
+      .map((topic) => topic.id)
+      .filter((id): id is number => typeof id === 'number')
+      .slice(0, MAX_TOPICS_PER_POST)
     const assets = toAssetsPayload()
     const imageUrls = assets.map((asset) => asset.fileUrl).filter(Boolean)
     const payload: {
@@ -300,6 +431,8 @@ async function submit() {
       postType: string
       imageUrls?: string[]
       tags?: string[]
+      topicIds?: number[]
+      topics?: string[]
       assets?: CreatePostAssetPayload[]
     } = {
       title: form.title.trim(),
@@ -308,6 +441,8 @@ async function submit() {
       channelCode: activeChannel.value,
       postType: currentPostType.value,
       ...(finalTopics.length > 0 ? { tags: finalTopics } : {}),
+      ...(topicIds.length > 0 ? { topicIds } : {}),
+      ...(finalTopics.length > 0 ? { topics: finalTopics } : {}),
       ...(assets.length > 0 ? { assets } : {}),
       ...(imageUrls.length > 0 ? { imageUrls } : {}),
     }
@@ -380,8 +515,8 @@ async function submit() {
               </div>
 
               <div v-if="selectedTopics.length > 0" class="publish-studio__selected-topics">
-                <span v-for="topic in selectedTopics" :key="topic">
-                  #{{ topic }}
+                <span v-for="topic in selectedTopics" :key="topicKey(topic)">
+                  #{{ topic.name }}
                   <button type="button" @click="removeTopic(topic)">×</button>
                 </span>
               </div>
@@ -414,9 +549,9 @@ async function submit() {
               </div>
 
               <div v-if="showTopicSearchPanel" class="publish-studio__topic-search-list">
-                <button v-for="item in topicCandidates" :key="item.name" type="button" @click="addTopic(item.name)">
+                <button v-for="item in topicCandidates" :key="item.id || item.slug || item.name" type="button" @click="addTopic(item)">
                   <strong>#{{ item.name }}</strong>
-                  <small>{{ item.heat }}</small>
+                  <small>{{ formatTopicHeat(item) }}</small>
                 </button>
                 <p v-if="topicLoading">正在加载话题...</p>
                 <p v-else-if="topicCandidates.length === 0">没有匹配话题</p>
@@ -425,8 +560,8 @@ async function submit() {
               <div v-else class="publish-studio__topic-recommend">
                 <span>推荐</span>
                 <div>
-                  <button v-for="topic in displayQuickTopics" :key="topic" type="button" @click="addTopic(topic)">
-                    #{{ topic }}
+                  <button v-for="topic in displayQuickTopics" :key="topic.id || topic.slug || topic.name" type="button" @click="addTopic(topic)">
+                    #{{ topic.name }}
                   </button>
                   <button v-if="quickTopicOverflow > 0" type="button" class="publish-studio__topic-more">+{{ quickTopicOverflow }}</button>
                   <small v-if="topicLoading">加载中...</small>
@@ -441,7 +576,7 @@ async function submit() {
             </div>
             <div class="publish-studio__channel-tabs">
               <button
-                v-for="channel in publishChannels"
+                v-for="channel in publishChannelOptions"
                 :key="channel.key"
                 type="button"
                 :class="{ 'is-selected': activeChannel === channel.key }"

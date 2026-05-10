@@ -45,6 +45,13 @@ public class TopicService {
         return topicMapper.selectByChannel(channelCode.trim(), normalizeLimit(limit));
     }
 
+    public List<Topic> listRelatedTopics(String slug, int limit) {
+        if (slug == null || slug.isBlank()) {
+            return List.of();
+        }
+        return topicMapper.selectRelatedBySlug(slug.trim(), normalizeLimit(limit));
+    }
+
     public Topic findBySlug(String slug) {
         if (slug == null || slug.isBlank()) {
             return null;

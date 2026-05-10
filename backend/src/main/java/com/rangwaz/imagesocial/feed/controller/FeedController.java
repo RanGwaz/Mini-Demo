@@ -1,9 +1,12 @@
 package com.rangwaz.imagesocial.feed.controller;
 
 import com.rangwaz.imagesocial.auth.SecurityUtils;
+import com.rangwaz.imagesocial.channel.ChannelService;
 import com.rangwaz.imagesocial.common.api.ApiResponse;
 import com.rangwaz.imagesocial.common.api.PageResponse;
 import com.rangwaz.imagesocial.common.exception.BusinessException;
+import com.rangwaz.imagesocial.domain.entity.Channel;
+import com.rangwaz.imagesocial.domain.entity.Topic;
 import com.rangwaz.imagesocial.feed.FeedFacetService;
 import com.rangwaz.imagesocial.feed.FeedOnlineMetricsService;
 import com.rangwaz.imagesocial.feed.FeedQuotaGuardService;
@@ -14,9 +17,9 @@ import com.rangwaz.imagesocial.feed.dto.FeedOnlineMetricsResponse;
 import com.rangwaz.imagesocial.feed.dto.FeedQuotaExperimentSnapshot;
 import com.rangwaz.imagesocial.feed.dto.FeedSourceHealthResponse;
 import com.rangwaz.imagesocial.feed.service.FeedService;
+import com.rangwaz.imagesocial.post.PostService;
 import com.rangwaz.imagesocial.post.dto.PostView;
-import com.rangwaz.imagesocial.taxonomy.ContentChannel;
-import java.util.stream.Collectors;
+import com.rangwaz.imagesocial.topic.TopicService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,18 +36,27 @@ public class FeedController {
     private final FeedOnlineMetricsService feedOnlineMetricsService;
     private final FeedQuotaGuardService feedQuotaGuardService;
     private final FeedSourceHealthTrackerService feedSourceHealthTrackerService;
+    private final PostService postService;
+    private final ChannelService channelService;
+    private final TopicService topicService;
 
     @Autowired
     public FeedController(FeedService feedService,
                           FeedFacetService feedFacetService,
                           FeedOnlineMetricsService feedOnlineMetricsService,
                           FeedQuotaGuardService feedQuotaGuardService,
-                          FeedSourceHealthTrackerService feedSourceHealthTrackerService) {
+                          FeedSourceHealthTrackerService feedSourceHealthTrackerService,
+                          PostService postService,
+                          ChannelService channelService,
+                          TopicService topicService) {
         this.feedService = feedService;
         this.feedFacetService = feedFacetService;
         this.feedOnlineMetricsService = feedOnlineMetricsService;
         this.feedQuotaGuardService = feedQuotaGuardService;
         this.feedSourceHealthTrackerService = feedSourceHealthTrackerService;
+        this.postService = postService;
+        this.channelService = channelService;
+        this.topicService = topicService;
     }
 
     @GetMapping
@@ -53,50 +65,46 @@ public class FeedController {
                                                     @RequestParam(required = false) Integer size,
                                                     @RequestParam(required = false) String seed,
                                                     @RequestParam(required = false) String channelCode,
+                                                    @RequestParam(required = false) Long topicId,
+                                                    @RequestParam(required = false) String topicSlug,
                                                     @RequestParam(required = false) String topic,
                                                     @RequestParam(required = false) String style,
                                                     @RequestParam(required = false) String tag) {
         Long currentUserId = SecurityUtils.currentUserIdOrNull();
         int resolvedSize = pageSize == null ? (size == null ? 24 : size) : pageSize;
-        return ApiResponse.success(feedService.homeFeed(
-                currentUserId,
-                page,
-                resolvedSize,
-                seed,
-                resolveTopicFilter(channelCode, topic),
-                style,
-                tag
-        ));
+        if (hasScopeFilter(channelCode, topicId, topicSlug)) {
+            return ApiResponse.success(postService.listPublicPostsByScope(
+                    resolveChannelCode(channelCode),
+                    resolveTopicId(topicId),
+                    resolveTopicSlug(topicId, topicSlug),
+                    page,
+                    resolvedSize
+            ));
+        }
+        return ApiResponse.success(feedService.homeFeed(currentUserId, page, resolvedSize, seed, topic, style, tag));
     }
 
     @GetMapping("/home")
     public ApiResponse<PageResponse<PostView>> home(@RequestParam(defaultValue = "1") int page,
                                                     @RequestParam(defaultValue = "24") int size,
                                                     @RequestParam(required = false) String seed,
+                                                    @RequestParam(required = false) String channelCode,
+                                                    @RequestParam(required = false) Long topicId,
+                                                    @RequestParam(required = false) String topicSlug,
                                                     @RequestParam(required = false) String topic,
                                                     @RequestParam(required = false) String style,
                                                     @RequestParam(required = false) String tag) {
         Long currentUserId = SecurityUtils.currentUserIdOrNull();
+        if (hasScopeFilter(channelCode, topicId, topicSlug)) {
+            return ApiResponse.success(postService.listPublicPostsByScope(
+                    resolveChannelCode(channelCode),
+                    resolveTopicId(topicId),
+                    resolveTopicSlug(topicId, topicSlug),
+                    page,
+                    size
+            ));
+        }
         return ApiResponse.success(feedService.homeFeed(currentUserId, page, size, seed, topic, style, tag));
-    }
-
-    private String resolveTopicFilter(String channelCode, String topic) {
-        if (channelCode == null || channelCode.isBlank() || "all".equalsIgnoreCase(channelCode.trim())) {
-            return topic;
-        }
-        ContentChannel channel = ContentChannel.fromKey(channelCode)
-                .orElseThrow(() -> new BusinessException("频道不存在"));
-        String channelTerms = java.util.stream.Stream.concat(
-                        java.util.stream.Stream.of(channel.key(), channel.label(), channel.topicPath()),
-                        channel.aliases().stream()
-                )
-                .filter(value -> value != null && !value.isBlank())
-                .distinct()
-                .collect(Collectors.joining(" "));
-        if (topic == null || topic.isBlank()) {
-            return channelTerms;
-        }
-        return channelTerms + " " + topic;
     }
 
     @GetMapping("/home/diagnostics")
@@ -157,5 +165,46 @@ public class FeedController {
     public ApiResponse<FeedQuotaExperimentSnapshot> homeQuotaExperiment(
             @RequestParam(required = false) String experimentName) {
         return ApiResponse.success(feedQuotaGuardService.snapshot(experimentName));
+    }
+
+    private boolean hasScopeFilter(String channelCode, Long topicId, String topicSlug) {
+        return (channelCode != null && !channelCode.isBlank() && !"all".equalsIgnoreCase(channelCode.trim()))
+                || (topicId != null && topicId > 0L)
+                || (topicSlug != null && !topicSlug.isBlank());
+    }
+
+    private String resolveChannelCode(String channelCode) {
+        if (channelCode == null || channelCode.isBlank() || "all".equalsIgnoreCase(channelCode.trim())) {
+            return null;
+        }
+        Channel channel = channelService.findByCode(channelCode.trim());
+        if (channel == null || !"ACTIVE".equalsIgnoreCase(channel.getStatus()) || !Boolean.TRUE.equals(channel.getEnabled())) {
+            throw new BusinessException("频道不存在");
+        }
+        return channel.getCode();
+    }
+
+    private Long resolveTopicId(Long topicId) {
+        if (topicId == null || topicId <= 0L) {
+            return null;
+        }
+        if (topicService.requireActiveById(topicId) == null) {
+            throw new BusinessException("Topic does not exist");
+        }
+        return topicId;
+    }
+
+    private String resolveTopicSlug(Long topicId, String topicSlug) {
+        if (topicId != null && topicId > 0L) {
+            return null;
+        }
+        if (topicSlug == null || topicSlug.isBlank()) {
+            return null;
+        }
+        Topic topic = topicService.findBySlug(topicSlug.trim());
+        if (topic == null || !"ACTIVE".equalsIgnoreCase(topic.getStatus())) {
+            throw new BusinessException("Topic does not exist");
+        }
+        return topic.getSlug();
     }
 }

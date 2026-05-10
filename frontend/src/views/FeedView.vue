@@ -12,12 +12,12 @@ import { useRoute, useRouter } from 'vue-router'
 import CommonLeftSidebar from '../components/CommonLeftSidebar.vue'
 import FeedCardRenderer from '../components/feed/FeedCardRenderer.vue'
 import {
-  feedChannelTabs as channelTabs,
+  feedChannelTabs as fallbackChannelTabs,
   feedModeTabs,
-  type FeedChannelKey as ChannelKey,
+  type FeedChannelDefinition,
   type FeedModeKey,
 } from '../domain/contentTaxonomy'
-import { api, type FeedRequestAuthMode } from '../services/api'
+import { api, type ChannelView, type FeedQueryFilters, type FeedRequestAuthMode, type TopicView } from '../services/api'
 import { HttpError } from '../services/http'
 import { useAuthStore } from '../stores/auth'
 import type { PostView, UserSummary } from '../types'
@@ -114,14 +114,28 @@ const emptyFeedMessage = computed(() => {
   return '暂时没有可展示的内容'
 })
 
+type ChannelKey = string
+
+const defaultFeedChannelTab: FeedChannelDefinition = fallbackChannelTabs.find((item) => item.key === 'all') || {
+  key: 'all',
+  label: '推荐',
+  desc: '跨圈层内容流',
+  signal: '实时更新',
+  keywords: [],
+  postType: 'general_post',
+  waterfall: true,
+}
 const activeFeedMode = ref<FeedModeKey>('recommend')
 const activeChannel = ref<ChannelKey>('all')
+const dynamicChannelTabs = ref<FeedChannelDefinition[]>(fallbackChannelTabs.length > 0 ? fallbackChannelTabs : [defaultFeedChannelTab])
+const hotTopicRows = ref<TopicView[]>([])
 
 const currentChannelMeta = computed(() => (
-  channelTabs.find((item) => item.key === activeChannel.value) || channelTabs[0]
+  dynamicChannelTabs.value.find((item) => item.key === activeChannel.value) || dynamicChannelTabs.value[0] || defaultFeedChannelTab
 ))
 
-const audienceSegments = computed(() => channelTabs.filter((item) => item.key !== 'all'))
+const channelTabs = computed(() => dynamicChannelTabs.value)
+const audienceSegments = computed(() => channelTabs.value.filter((item) => item.key !== 'all'))
 const currentChannelAvatar = computed(() => currentChannelMeta.value.avatar || 'https://picsum.photos/seed/vibelo-recommend/160/160')
 const currentChannelDescription = computed(() => currentChannelMeta.value.desc || '跨圈层内容流')
 const currentChannelSignal = computed(() => currentChannelMeta.value.signal || '实时更新')
@@ -151,13 +165,6 @@ const recommendationTabs = [
   { key: 'fresh', label: '新鲜发布' },
   { key: 'longform', label: '长文精选' },
 ] satisfies Array<{ key: string; label: string; mode?: FeedModeKey }>
-
-const hotTopicRows = [
-  { name: '春日影像计划', heat: '12.8万浏览' },
-  { name: '宠物的治愈瞬间', heat: '9.6万浏览' },
-  { name: '校园春日限定', heat: '7.2万浏览' },
-  { name: 'AI工具测评', heat: '4.1万浏览' },
-]
 
 const watchLaterRows = [
   { title: '手机摄影进阶构图', meta: '8分钟阅读', image: 'https://picsum.photos/seed/watch-photo/120/80' },
@@ -212,9 +219,73 @@ function resolveFeedModeFromRoute(): FeedModeKey {
 
 function resolveChannelFromRoute(): ChannelKey {
   const value = routeQueryValue(route.query.channel)
-  return channelTabs.some((item) => item.key === value)
-    ? value as ChannelKey
+  return channelTabs.value.some((item) => item.key === value)
+    ? value
     : 'all'
+}
+
+function fallbackChannelMeta(code: string) {
+  return fallbackChannelTabs.find((item) => item.key === code)
+}
+
+function buildChannelKeywords(channel: ChannelView, fallback?: FeedChannelDefinition) {
+  return [
+    channel.code,
+    channel.name,
+    channel.description,
+    ...(fallback?.keywords || []),
+  ]
+    .filter((item): item is string => Boolean(item && item.trim()))
+    .map((item) => item.trim())
+}
+
+function mapApiFeedChannel(channel: ChannelView): FeedChannelDefinition {
+  const fallback = fallbackChannelMeta(channel.code)
+  const filters: FeedQueryFilters = { channelCode: channel.code }
+  return {
+    key: channel.code,
+    label: channel.name,
+    desc: channel.description || fallback?.desc || '正在生长的内容频道',
+    signal: fallback?.signal || (channel.waterfall ? '瀑布流展示' : '专题流展示'),
+    topicPath: channel.name,
+    filters,
+    keywords: buildChannelKeywords(channel, fallback),
+    avatar: channel.icon || fallback?.avatar || `https://picsum.photos/seed/channel-${channel.code}/80/80`,
+    postType: channel.postType || fallback?.postType || 'general_post',
+    waterfall: channel.waterfall ?? fallback?.waterfall ?? true,
+  }
+}
+
+async function loadFeedChannels() {
+  try {
+    const channels = await api.channels()
+    const next = channels
+      .filter((item) => item.code && item.name)
+      .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+      .map(mapApiFeedChannel)
+    if (next.length > 0) {
+      dynamicChannelTabs.value = [defaultFeedChannelTab, ...next]
+    }
+  } catch {
+    dynamicChannelTabs.value = fallbackChannelTabs
+  }
+}
+
+async function loadHotTopics() {
+  try {
+    hotTopicRows.value = await api.trendingTopics(8)
+  } catch {
+    hotTopicRows.value = []
+  }
+}
+
+function formatTopicHeat(topic: TopicView) {
+  const postCount = Number(topic.postCount || 0)
+  if (postCount >= 10000) return `${(postCount / 10000).toFixed(1)}万篇`
+  if (postCount > 0) return `${postCount}篇`
+  const hotScore = Number(topic.hotScore || 0)
+  if (hotScore > 0) return `热度 ${Math.round(hotScore)}`
+  return '新话题'
 }
 
 function applyRouteFeedState() {
@@ -240,7 +311,7 @@ function isFriendsFeedMode() {
 }
 
 function currentChannelFilters() {
-  const meta = channelTabs.find((item) => item.key === activeChannel.value)
+  const meta = channelTabs.value.find((item) => item.key === activeChannel.value)
   return meta?.filters
 }
 
@@ -265,7 +336,7 @@ function postSearchTokens(post: PostView) {
 
 function postMatchesCurrentChannel(post: PostView) {
   if (activeChannel.value === 'all') return true
-  const channel = channelTabs.find((item) => item.key === activeChannel.value)
+  const channel = channelTabs.value.find((item) => item.key === activeChannel.value)
   if (!channel) return true
   if (post.channelCode === channel.key || post.channel === channel.key) return true
   const haystack = postSearchTokens(post)
@@ -1160,6 +1231,8 @@ watch(
 
 onMounted(async () => {
   resetFeedRequestAuthMode()
+  const hotTopicsTask = loadHotTopics()
+  await loadFeedChannels()
   applyRouteFeedState()
   updateColumnCount()
   const navType = navigationType()
@@ -1203,6 +1276,7 @@ onMounted(async () => {
   }
   sessionStorage.removeItem(FEED_SCROLL_RESTORE_KEY)
   sessionStorage.removeItem(FEED_SCROLL_Y_KEY)
+  void hotTopicsTask
 })
 
 onActivated(() => {
@@ -1493,10 +1567,15 @@ onUnmounted(() => {
             <button type="button">更多 <el-icon><ArrowRight /></el-icon></button>
           </div>
           <ol class="feed-home__topic-list">
-            <li v-for="(topic, index) in hotTopicRows" :key="topic.name">
+            <li v-for="(topic, index) in hotTopicRows" :key="topic.name" @click="router.push(`/topics/${topic.slug}`)">
               <span>{{ index + 1 }}</span>
               <strong># {{ topic.name }}</strong>
-              <em>{{ topic.heat }}</em>
+              <em>{{ formatTopicHeat(topic) }}</em>
+            </li>
+            <li v-if="hotTopicRows.length === 0">
+              <span>1</span>
+              <strong># 校园生活</strong>
+              <em>初始化中</em>
             </li>
           </ol>
         </section>
@@ -1511,7 +1590,7 @@ onUnmounted(() => {
         </div>
         <ol class="feed-home__topic-list">
           <li v-for="(segment, index) in audienceSegments" :key="segment.key"
-            :class="{ 'is-active': segment.key === activeChannel }" @click="selectChannel(segment.key)">
+            :class="{ 'is-active': segment.key === activeChannel }" @click="router.push(`/channels/${segment.key}`)">
             <span>{{ index + 1 }}</span>
             <strong>{{ segment.label }}</strong>
             <em>{{ segment.signal }}</em>

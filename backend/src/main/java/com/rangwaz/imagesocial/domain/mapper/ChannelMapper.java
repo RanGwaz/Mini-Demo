@@ -26,4 +26,24 @@ public interface ChannelMapper extends BaseMapper<Channel> {
             LIMIT 1
             """)
     Channel selectByCode(@Param("code") String code);
+
+    @Select("""
+            <script>
+            SELECT *
+            FROM channels
+            WHERE status = 'ACTIVE'
+              AND enabled = 1
+              <if test='keyword != null and keyword != ""'>
+                AND (
+                  code LIKE CONCAT('%', #{keyword}, '%')
+                  OR name LIKE CONCAT('%', #{keyword}, '%')
+                  OR description LIKE CONCAT('%', #{keyword}, '%')
+                )
+              </if>
+            ORDER BY sort_order ASC, id ASC
+            LIMIT #{limit}
+            </script>
+            """)
+    List<Channel> searchActiveChannels(@Param("keyword") String keyword,
+                                       @Param("limit") int limit);
 }

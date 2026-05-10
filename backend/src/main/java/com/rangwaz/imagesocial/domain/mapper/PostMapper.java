@@ -360,13 +360,21 @@ public interface PostMapper extends BaseMapper<Post> {
                 AND t.slug = #{topicSlug}
                 AND t.status = 'ACTIVE'
               </if>
-            ORDER BY p.hot_score DESC, p.created_at DESC
+            <choose>
+              <when test='sort == "latest"'>
+                ORDER BY p.created_at DESC, p.id DESC
+              </when>
+              <otherwise>
+                ORDER BY p.hot_score DESC, p.created_at DESC
+              </otherwise>
+            </choose>
             LIMIT #{limit} OFFSET #{offset}
             </script>
             """)
     List<Post> selectPublicPostsByScope(@Param("channelCode") String channelCode,
                                         @Param("topicId") Long topicId,
                                         @Param("topicSlug") String topicSlug,
+                                        @Param("sort") String sort,
                                         @Param("offset") int offset,
                                         @Param("limit") int limit);
 
@@ -444,6 +452,22 @@ public interface PostMapper extends BaseMapper<Post> {
             </script>
             """)
     List<Post> selectByIds(@Param("ids") List<Long> ids);
+
+    @Select("""
+            <script>
+            SELECT p.*
+            FROM posts p
+            WHERE COALESCE(p.tags, '') != ''
+              AND NOT EXISTS (
+                SELECT 1
+                FROM post_topics pt
+                WHERE pt.post_id = p.id
+              )
+            ORDER BY p.id ASC
+            LIMIT #{limit}
+            </script>
+            """)
+    List<Post> selectPostsForTopicBackfill(@Param("limit") int limit);
 
     @Update("""
             UPDATE posts

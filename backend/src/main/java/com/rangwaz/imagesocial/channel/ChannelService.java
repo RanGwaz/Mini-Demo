@@ -10,6 +10,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class ChannelService {
 
+    private static final int DEFAULT_SEARCH_LIMIT = 20;
+    private static final int MAX_SEARCH_LIMIT = 100;
+
     private final ChannelMapper channelMapper;
 
     public ChannelService(ChannelMapper channelMapper) {
@@ -25,6 +28,20 @@ public class ChannelService {
             return null;
         }
         return channelMapper.selectByCode(code.trim());
+    }
+
+    public Channel findActiveByCode(String code) {
+        Channel channel = findByCode(code);
+        if (channel == null
+                || !"ACTIVE".equalsIgnoreCase(channel.getStatus())
+                || !Boolean.TRUE.equals(channel.getEnabled())) {
+            return null;
+        }
+        return channel;
+    }
+
+    public List<Channel> searchActiveChannels(String keyword, int limit) {
+        return channelMapper.searchActiveChannels(normalizeKeyword(keyword), normalizeLimit(limit));
     }
 
     public ChannelView toView(Channel channel) {
@@ -45,5 +62,16 @@ public class ChannelService {
             return primary;
         }
         return fallback == null ? "" : fallback;
+    }
+
+    private String normalizeKeyword(String keyword) {
+        return keyword == null ? "" : keyword.trim();
+    }
+
+    private int normalizeLimit(int limit) {
+        if (limit <= 0) {
+            return DEFAULT_SEARCH_LIMIT;
+        }
+        return Math.min(limit, MAX_SEARCH_LIMIT);
     }
 }

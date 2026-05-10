@@ -6,20 +6,21 @@ import {
   EditPen,
   Plus,
   Search,
+  Setting,
   SwitchButton,
   User,
   UserFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AuthWallDialog from './AuthWallDialog.vue'
 import { useAuthStore } from '../stores/auth'
 
 type NavItem = {
-  key: 'creator'
+  key: 'creator' | 'admin'
   label: string
-  path: '/publish'
+  path: string
 }
 
 const router = useRouter()
@@ -29,9 +30,12 @@ const globalKeyword = ref('')
 
 authStore.hydrate()
 
-const navItems: NavItem[] = [
-  { key: 'creator', label: '创作者中心', path: '/publish' },
-]
+const isAdmin = computed(() => (authStore.currentUser?.roles ?? '').split(',').map((role) => role.trim()).includes('ROLE_ADMIN'))
+
+const navItems = computed<NavItem[]>(() => [
+  { key: 'creator', label: '创作中心', path: '/publish' },
+  ...(isAdmin.value ? [{ key: 'admin' as const, label: '运营后台', path: '/admin' }] : []),
+])
 
 function go(path: string) {
   void router.push(path)
@@ -41,12 +45,10 @@ function handleDeveloping(name: string) {
   ElMessage.info(`${name} 功能正在完善中`)
 }
 
-function isFeedSurfacePath() {
-  return route.path === '/home' || route.path === '/feed' || route.path.startsWith('/posts/')
-}
-
 function isNavActive(item: NavItem) {
-  return item.key === 'creator' && route.path.startsWith('/publish')
+  if (item.key === 'creator') return route.path.startsWith('/publish')
+  if (item.key === 'admin') return route.path.startsWith('/admin')
+  return false
 }
 
 function handleNav(item: NavItem) {
@@ -60,11 +62,7 @@ function handleNav(item: NavItem) {
 function submitGlobalSearch() {
   const keyword = globalKeyword.value.trim()
   if (!keyword) return
-  const baseQuery = isFeedSurfacePath()
-    ? { ...route.query } as Record<string, string | string[] | null | undefined>
-    : {}
-  baseQuery.q = keyword
-  void router.push({ path: '/home', query: baseQuery })
+  void router.push({ path: '/search', query: { q: keyword } })
 }
 
 function publish() {
@@ -82,6 +80,10 @@ async function handleAvatarCommand(command: string) {
   }
   if (command === 'publish') {
     go('/publish')
+    return
+  }
+  if (command === 'admin') {
+    go('/admin')
     return
   }
   if (command === 'logout') {
@@ -161,6 +163,10 @@ watch(
               <el-dropdown-item v-if="authStore.currentUser" command="publish">
                 <el-icon><EditPen /></el-icon>
                 发布内容
+              </el-dropdown-item>
+              <el-dropdown-item v-if="isAdmin" command="admin">
+                <el-icon><Setting /></el-icon>
+                运营后台
               </el-dropdown-item>
               <el-dropdown-item v-if="authStore.currentUser" divided command="logout">
                 <el-icon><SwitchButton /></el-icon>

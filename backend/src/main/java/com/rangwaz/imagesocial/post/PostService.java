@@ -103,8 +103,8 @@ public class PostService {
     @Transactional
     public PostView createPost(Long authorId, CreatePostRequest request) {
         User author = userService.requireById(authorId);
-        Channel channel = resolveChannel(request);
-        String postType = resolvePostType(channel, request.postType());
+        Channel channel = resolveDatabaseChannel(request);
+        String postType = resolveDatabasePostType(channel, request.postType());
         String title = normalizeTitle(request.title());
         String content = request.content() == null ? "" : request.content().trim();
         List<Topic> publishTopics = topicService.resolvePublishTopics(
@@ -227,6 +227,48 @@ public class PostService {
         );
     }
 
+    public PageResponse<PostView> listByTopic(Long topicId, int page, int size) {
+        return listPublicPostsByScope(null, topicId, null, "hot", page, size);
+    }
+
+    public PageResponse<PostView> listByTopic(Long topicId, String sort, int page, int size) {
+        return listPublicPostsByScope(null, topicId, null, sort, page, size);
+    }
+
+    public PageResponse<PostView> listByChannel(String channelCode, String sort, int page, int size) {
+        return listPublicPostsByScope(channelCode, null, null, sort, page, size);
+    }
+
+    public PageResponse<PostView> listPublicPostsByScope(String channelCode,
+                                                         Long topicId,
+                                                         String topicSlug,
+                                                         int page,
+                                                         int size) {
+        return listPublicPostsByScope(channelCode, topicId, topicSlug, "hot", page, size);
+    }
+
+    public PageResponse<PostView> listPublicPostsByScope(String channelCode,
+                                                         Long topicId,
+                                                         String topicSlug,
+                                                         String sort,
+                                                         int page,
+                                                         int size) {
+        int safePage = Math.max(1, page);
+        int safeSize = Math.min(100, Math.max(1, size));
+        int offset = (safePage - 1) * safeSize;
+        String safeChannelCode = channelCode == null || channelCode.isBlank() ? null : channelCode.trim();
+        String safeTopicSlug = topicSlug == null || topicSlug.isBlank() ? null : topicSlug.trim();
+        String safeSort = "latest".equalsIgnoreCase(sort) ? "latest" : "hot";
+        long total = postMapper.countPublicPostsByScope(safeChannelCode, topicId, safeTopicSlug);
+        List<Post> posts = postMapper.selectPublicPostsByScope(safeChannelCode, topicId, safeTopicSlug, safeSort, offset, safeSize);
+        return new PageResponse<>(
+                toViews(posts, post -> "频道/话题内容"),
+                total,
+                safePage,
+                safeSize
+        );
+    }
+
     public void increaseView(Long postId, Long currentUserId, String requestIp) {
         String viewerKey = currentUserId != null ? "u:" + currentUserId : "ip:" + (requestIp == null ? "unknown" : requestIp);
         String key = postId + ":" + viewerKey;
@@ -251,6 +293,7 @@ public class PostService {
         postCommentMapper.delete(new LambdaQueryWrapper<PostComment>().eq(PostComment::getPostId, postId));
         postNegativeFeedbackMapper.delete(new LambdaQueryWrapper<PostNegativeFeedback>().eq(PostNegativeFeedback::getPostId, postId));
         contentReportMapper.delete(new LambdaQueryWrapper<ContentReport>().eq(ContentReport::getPostId, postId));
+        postTopicService.deleteByPostId(postId);
         postMapper.deleteById(postId);
         eventService.publish("POST_DELETE", currentUserId, "POST", postId, Map.of("authorId", post.getAuthorId()));
     }
@@ -371,18 +414,25 @@ public class PostService {
         );
     }
 
-    private ContentChannel resolveChannel(CreatePostRequest request) {
+    private Channel resolveDatabaseChannel(CreatePostRequest request) {
         String channelKey = firstNonBlank(request.channelCode(), request.channel());
         if (channelKey == null || channelKey.isBlank()) {
-            return ContentChannel.defaultChannel();
+            channelKey = "campus";
         }
-        return ContentChannel.fromKey(channelKey)
-                .orElseThrow(() -> new BusinessException("频道不存在"));
+        Channel channel = channelService.findByCode(channelKey);
+        if (channel == null
+                || !"ACTIVE".equalsIgnoreCase(channel.getStatus())
+                || !Boolean.TRUE.equals(channel.getEnabled())
+                || !Boolean.TRUE.equals(channel.getPublishEnabled())) {
+            throw new BusinessException("频道不存在或不可发布");
+        }
+        return channel;
     }
 
-    private String resolvePostType(ContentChannel channel, String rawPostType) {
-        String value = firstNonBlank(rawPostType, channel.postType());
-        return value == null || value.isBlank() ? channel.postType() : value;
+    private String resolveDatabasePostType(Channel channel, String rawPostType) {
+        String defaultPostType = firstNonBlank(channel.getDefaultPostType(), "general_post");
+        String value = firstNonBlank(rawPostType, defaultPostType);
+        return value == null || value.isBlank() ? defaultPostType : value;
     }
 
     private List<PostAssetRequest> normalizeAssets(CreatePostRequest request) {
@@ -478,7 +528,6 @@ public class PostService {
                 .filter(Objects::nonNull)
                 .map(String::trim)
                 .filter(value -> !value.isBlank())
-                .filter(value -> !ContentChannel.isChannelLabel(value))
                 .distinct()
                 .limit(10)
                 .toList();
@@ -492,8 +541,29 @@ public class PostService {
         return String.join(",", normalizedTags);
     }
 
-    private List<String> buildSemanticTerms(ContentChannel channel, List<String> tags) {
-        return java.util.stream.Stream.concat(java.util.stream.Stream.of(channel.key(), channel.topicPath()), tags.stream())
+    private String buildTopicPath(Channel channel, List<Topic> topics) {
+        String channelName = firstNonBlank(channel.getName(), channel.getCode());
+        if (topics == null || topics.isEmpty()) {
+            return channelName;
+        }
+        String topicPath = topics.stream()
+                .map(Topic::getName)
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .limit(4)
+                .collect(Collectors.joining("/"));
+        return topicPath.isBlank() ? channelName : channelName + "/" + topicPath;
+    }
+
+    private List<String> buildSemanticTerms(Channel channel, List<Topic> topics, List<String> tags) {
+        java.util.stream.Stream<String> topicTerms = topics == null
+                ? java.util.stream.Stream.empty()
+                : topics.stream().flatMap(topic -> java.util.stream.Stream.of(topic.getName(), topic.getSlug()));
+        return java.util.stream.Stream.concat(
+                        java.util.stream.Stream.of(channel.getCode(), channel.getName(), buildTopicPath(channel, topics)),
+                        java.util.stream.Stream.concat(topicTerms, tags.stream())
+                )
                 .filter(Objects::nonNull)
                 .map(String::trim)
                 .filter(value -> !value.isBlank())
