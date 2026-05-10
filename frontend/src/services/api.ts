@@ -213,6 +213,107 @@ export interface FeedImpressionLogView {
   createdAt?: string
 }
 
+export interface EnterpriseOverview {
+  datasets: number
+  models: number
+  openModerationCases: number
+  creators: number
+  commercialPosts: number
+}
+
+export interface TrainingDatasetView {
+  id: number
+  name: string
+  datasetType: string
+  status: string
+  splitStrategy?: string
+  rowCount?: number
+  positiveCount?: number
+  negativeCount?: number
+  filePath?: string
+  metricsJson?: string
+  createdAt?: string
+}
+
+export interface ModelVersionView {
+  id: number
+  modelName: string
+  version: string
+  modelType: string
+  status: string
+  datasetId?: number
+  artifactUri?: string
+  shadowEnabled?: boolean
+  onlineEnabled?: boolean
+  trafficPercent?: number
+  guardrailJson?: string
+  createdAt?: string
+}
+
+export interface OfflineEvalReportView {
+  id: number
+  modelVersionId?: number
+  datasetId?: number
+  auc?: number
+  ndcg?: number
+  recallScore?: number
+  precisionScore?: number
+  metricsJson?: string
+  reportPath?: string
+  status?: string
+  createdAt?: string
+}
+
+export interface ContentModerationCaseView {
+  id: number
+  postId: number
+  reporterId?: number
+  reason?: string
+  status: string
+  priority: string
+  riskLevel: string
+  decision?: string
+  actionNote?: string
+  createdAt?: string
+  resolvedAt?: string
+}
+
+export interface AccountModerationActionView {
+  id: number
+  userId: number
+  actionType: string
+  reason?: string
+  status: string
+  expiresAt?: string
+  createdAt?: string
+}
+
+export interface CreatorProfileView {
+  id: number
+  userId: number
+  domainTags?: string
+  creatorLevel: string
+  qualityScore?: number
+  violationStatus?: string
+  monetizationStatus?: string
+  commercialStatus?: string
+  createdAt?: string
+}
+
+export interface CommercialContentProfileView {
+  id: number
+  postId: number
+  brandName?: string
+  disclosureType?: string
+  campaignCode?: string
+  status: string
+  bidType?: string
+  budgetCents?: number
+  landingUrl?: string
+  configJson?: string
+  createdAt?: string
+}
+
 export type AdminChannelPayload = Partial<Omit<AdminChannelView, 'id'>>
 export type AdminTopicPayload = Partial<Omit<AdminTopicView, 'id'>> & { channelCodes?: string[] }
 export type AdminImportItemPayload = {
@@ -583,5 +684,59 @@ export const api = {
   },
   adminFeedImpressions(params?: { requestId?: string; postId?: number; page?: number; size?: number }) {
     return unwrap<PageResponse<FeedImpressionLogView>>(http.get('/api/admin/feed-impressions', { params }))
+  },
+  enterpriseOverview() {
+    return unwrap<EnterpriseOverview>(http.get('/api/admin/enterprise/overview'))
+  },
+  enterpriseDatasets(params?: { status?: string; page?: number; size?: number }) {
+    return unwrap<PageResponse<TrainingDatasetView>>(http.get('/api/admin/enterprise/datasets', { params }))
+  },
+  enterpriseCreateDataset(payload: Partial<TrainingDatasetView> & { metrics?: Record<string, unknown> }) {
+    return unwrap<TrainingDatasetView>(http.post('/api/admin/enterprise/datasets', payload))
+  },
+  enterpriseUpdateDataset(id: number, payload: Partial<TrainingDatasetView> & { metrics?: Record<string, unknown> }) {
+    return unwrap<TrainingDatasetView>(http.patch(`/api/admin/enterprise/datasets/${id}`, payload))
+  },
+  enterpriseModels(params?: { status?: string; page?: number; size?: number }) {
+    return unwrap<PageResponse<ModelVersionView>>(http.get('/api/admin/enterprise/models', { params }))
+  },
+  enterpriseCreateModel(payload: Partial<ModelVersionView> & { guardrail?: Record<string, unknown> }) {
+    return unwrap<ModelVersionView>(http.post('/api/admin/enterprise/models', payload))
+  },
+  enterpriseUpdateModel(id: number, payload: Partial<ModelVersionView> & { guardrail?: Record<string, unknown> }) {
+    return unwrap<ModelVersionView>(http.patch(`/api/admin/enterprise/models/${id}`, payload))
+  },
+  enterpriseEvalReports(params?: { modelVersionId?: number; datasetId?: number; page?: number; size?: number }) {
+    return unwrap<PageResponse<OfflineEvalReportView>>(http.get('/api/admin/enterprise/eval-reports', { params }))
+  },
+  enterpriseCreateEvalReport(payload: Partial<OfflineEvalReportView> & { metrics?: Record<string, unknown> }) {
+    return unwrap<OfflineEvalReportView>(http.post('/api/admin/enterprise/eval-reports', payload))
+  },
+  enterpriseModerationCases(params?: { status?: string; priority?: string; page?: number; size?: number }) {
+    return unwrap<PageResponse<ContentModerationCaseView>>(http.get('/api/admin/enterprise/moderation-cases', { params }))
+  },
+  enterpriseCreateModerationCase(payload: Partial<ContentModerationCaseView>) {
+    return unwrap<ContentModerationCaseView>(http.post('/api/admin/enterprise/moderation-cases', payload))
+  },
+  enterpriseResolveModerationCase(id: number, payload: { decision?: string; status?: string; actionNote?: string }) {
+    return unwrap<ContentModerationCaseView>(http.patch(`/api/admin/enterprise/moderation-cases/${id}/resolve`, payload))
+  },
+  enterpriseAccountActions(params?: { userId?: number; status?: string; page?: number; size?: number }) {
+    return unwrap<PageResponse<AccountModerationActionView>>(http.get('/api/admin/enterprise/account-actions', { params }))
+  },
+  enterpriseCreateAccountAction(payload: { userId: number; actionType: string; reason?: string; expiresAt?: string }) {
+    return unwrap<AccountModerationActionView>(http.post('/api/admin/enterprise/account-actions', payload))
+  },
+  enterpriseCreators(params?: { level?: string; page?: number; size?: number }) {
+    return unwrap<PageResponse<CreatorProfileView>>(http.get('/api/admin/enterprise/creators', { params }))
+  },
+  enterpriseUpsertCreator(payload: Partial<CreatorProfileView> & { userId: number }) {
+    return unwrap<CreatorProfileView>(http.post('/api/admin/enterprise/creators', payload))
+  },
+  enterpriseCommercialContent(params?: { status?: string; page?: number; size?: number }) {
+    return unwrap<PageResponse<CommercialContentProfileView>>(http.get('/api/admin/enterprise/commercial-content', { params }))
+  },
+  enterpriseUpsertCommercialContent(payload: Partial<CommercialContentProfileView> & { postId: number; config?: Record<string, unknown> }) {
+    return unwrap<CommercialContentProfileView>(http.post('/api/admin/enterprise/commercial-content', payload))
   },
 }

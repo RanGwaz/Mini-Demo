@@ -1,0 +1,45 @@
+spring:
+  datasource:
+    url: ${MYSQL_URL}
+    username: ${MYSQL_USERNAME}
+    password: ${MYSQL_PASSWORD}
+    hikari:
+      maximum-pool-size: ${MYSQL_POOL_MAX:24}
+      minimum-idle: ${MYSQL_POOL_MIN:4}
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9094}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+jwt:
+  issuer: ${JWT_ISSUER:image-social-platform-staging}
+  secret: ${JWT_SECRET}
+  access-token-expire-seconds: ${JWT_EXPIRE_SECONDS:86400}
+
+app:
+  minio:
+    endpoint: ${MINIO_ENDPOINT}
+    access-key: ${MINIO_ACCESS_KEY}
+    secret-key: ${MINIO_SECRET_KEY}
+    bucket: ${MINIO_BUCKET}
+    public-endpoint: ${MINIO_PUBLIC_ENDPOINT}
+  kafka:
+    enabled: ${APP_KAFKA_ENABLED:true}
+  elasticsearch:
+    enabled: ${ELASTICSEARCH_ENABLED:false}
+    endpoint: ${ELASTICSEARCH_ENDPOINT:http://localhost:9200}
+  recommendation:
+    deep-rank:
+      enabled: ${DEEP_RANK_ENABLED:true}
+      endpoint: ${DEEP_RANK_ENDPOINT}
+      recall-endpoint: ${DEEP_RECALL_ENDPOINT}
+      auth-token: ${DEEP_RANK_AUTH_TOKEN:}

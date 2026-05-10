@@ -28,11 +28,19 @@ import {
   type ContentImportBatchView,
   type ContentImportItemView,
   type ContentRebuildTaskView,
+  type EnterpriseOverview,
   type FeedImpressionLogView,
   type FeedRequestLogView,
+  type TrainingDatasetView,
+  type ModelVersionView,
+  type OfflineEvalReportView,
+  type ContentModerationCaseView,
+  type AccountModerationActionView,
+  type CreatorProfileView,
+  type CommercialContentProfileView,
 } from '../services/api'
 
-type AdminTab = 'overview' | 'channels' | 'topics' | 'posts' | 'imports' | 'rebuild' | 'recommendation'
+type AdminTab = 'overview' | 'channels' | 'topics' | 'posts' | 'imports' | 'rebuild' | 'recommendation' | 'models' | 'governance' | 'creators'
 type UploadError = Parameters<NonNullable<UploadRequestOptions['onError']>>[0]
 
 const activeTab = ref<AdminTab>('overview')
@@ -126,6 +134,23 @@ const impressionFilters = reactive({ requestId: '', postId: undefined as number 
 const impressionRows = ref<FeedImpressionLogView[]>([])
 const impressionTotal = ref(0)
 
+const enterpriseOverview = ref<EnterpriseOverview | null>(null)
+const datasetRows = ref<TrainingDatasetView[]>([])
+const modelRows = ref<ModelVersionView[]>([])
+const evalRows = ref<OfflineEvalReportView[]>([])
+const moderationRows = ref<ContentModerationCaseView[]>([])
+const accountActionRows = ref<AccountModerationActionView[]>([])
+const creatorRows = ref<CreatorProfileView[]>([])
+const commercialRows = ref<CommercialContentProfileView[]>([])
+const enterpriseFilters = reactive({ status: '', level: '', priority: '', page: 1, size: 30 })
+const datasetForm = reactive({ name: '', datasetType: 'RANKING', status: 'DRAFT', filePath: '', rowCount: 0, positiveCount: 0, negativeCount: 0 })
+const modelForm = reactive({ modelName: '', version: '', modelType: 'RANKING', status: 'DRAFT', datasetId: undefined as number | undefined, artifactUri: '', trafficPercent: 0, shadowEnabled: false, onlineEnabled: false })
+const evalForm = reactive({ modelVersionId: undefined as number | undefined, datasetId: undefined as number | undefined, auc: 0, ndcg: 0, recallScore: 0, precisionScore: 0, reportPath: '' })
+const moderationForm = reactive({ postId: undefined as number | undefined, reason: '', priority: 'NORMAL', riskLevel: 'NORMAL' })
+const accountActionForm = reactive({ userId: undefined as number | undefined, actionType: 'WARN', reason: '' })
+const creatorForm = reactive({ userId: undefined as number | undefined, domainTags: '', creatorLevel: 'SEED', qualityScore: 0, monetizationStatus: 'DISABLED' })
+const commercialForm = reactive({ postId: undefined as number | undefined, brandName: '', disclosureType: 'NONE', campaignCode: '', status: 'DRAFT', budgetCents: 0, landingUrl: '' })
+
 const statusOptions = [
   { label: '全部', value: '' },
   { label: '启用', value: 'ACTIVE' },
@@ -207,6 +232,10 @@ async function loadAdminPage() {
       loadBatches(),
       loadRebuildTasks(),
       loadFeedRequests(),
+      loadEnterpriseOverview(),
+      loadModelOps(),
+      loadGovernance(),
+      loadCreatorsAndCommercial(),
     ])
   } finally {
     loading.value = false
@@ -263,6 +292,39 @@ async function loadFeedImpressions() {
   const data = await api.adminFeedImpressions(impressionFilters)
   impressionRows.value = data.records
   impressionTotal.value = data.total
+}
+
+async function loadEnterpriseOverview() {
+  enterpriseOverview.value = await api.enterpriseOverview()
+}
+
+async function loadModelOps() {
+  const [datasets, models, reports] = await Promise.all([
+    api.enterpriseDatasets({ status: enterpriseFilters.status, page: 1, size: 50 }),
+    api.enterpriseModels({ status: enterpriseFilters.status, page: 1, size: 50 }),
+    api.enterpriseEvalReports({ page: 1, size: 50 }),
+  ])
+  datasetRows.value = datasets.records
+  modelRows.value = models.records
+  evalRows.value = reports.records
+}
+
+async function loadGovernance() {
+  const [cases, actions] = await Promise.all([
+    api.enterpriseModerationCases({ status: enterpriseFilters.status, priority: enterpriseFilters.priority, page: 1, size: 50 }),
+    api.enterpriseAccountActions({ status: enterpriseFilters.status, page: 1, size: 50 }),
+  ])
+  moderationRows.value = cases.records
+  accountActionRows.value = actions.records
+}
+
+async function loadCreatorsAndCommercial() {
+  const [creators, commercial] = await Promise.all([
+    api.enterpriseCreators({ level: enterpriseFilters.level, page: 1, size: 50 }),
+    api.enterpriseCommercialContent({ status: enterpriseFilters.status, page: 1, size: 50 }),
+  ])
+  creatorRows.value = creators.records
+  commercialRows.value = commercial.records
 }
 
 function openCreateChannel() {
@@ -612,6 +674,73 @@ async function selectFeedRequest(row: FeedRequestLogView) {
   await loadFeedImpressions()
 }
 
+async function createDataset() {
+  if (!datasetForm.name.trim()) return ElMessage.warning('训练数据集名称不能为空')
+  await api.enterpriseCreateDataset(datasetForm)
+  Object.assign(datasetForm, { name: '', datasetType: 'RANKING', status: 'DRAFT', filePath: '', rowCount: 0, positiveCount: 0, negativeCount: 0 })
+  ElMessage.success('训练数据集已登记')
+  await Promise.all([loadModelOps(), loadEnterpriseOverview()])
+}
+
+async function createModel() {
+  if (!modelForm.modelName.trim() || !modelForm.version.trim()) return ElMessage.warning('模型名称和版本不能为空')
+  await api.enterpriseCreateModel(modelForm)
+  Object.assign(modelForm, { modelName: '', version: '', modelType: 'RANKING', status: 'DRAFT', datasetId: undefined, artifactUri: '', trafficPercent: 0, shadowEnabled: false, onlineEnabled: false })
+  ElMessage.success('模型版本已登记')
+  await Promise.all([loadModelOps(), loadEnterpriseOverview()])
+}
+
+async function updateModelStatus(row: ModelVersionView, status: string) {
+  await api.enterpriseUpdateModel(row.id, { ...row, status })
+  ElMessage.success('模型状态已更新')
+  await loadModelOps()
+}
+
+async function createEvalReport() {
+  await api.enterpriseCreateEvalReport(evalForm)
+  Object.assign(evalForm, { modelVersionId: undefined, datasetId: undefined, auc: 0, ndcg: 0, recallScore: 0, precisionScore: 0, reportPath: '' })
+  ElMessage.success('评估报告已记录')
+  await loadModelOps()
+}
+
+async function createModerationCase() {
+  if (!moderationForm.postId) return ElMessage.warning('内容 ID 不能为空')
+  await api.enterpriseCreateModerationCase({ ...moderationForm, status: 'OPEN' })
+  Object.assign(moderationForm, { postId: undefined, reason: '', priority: 'NORMAL', riskLevel: 'NORMAL' })
+  ElMessage.success('审核案件已创建')
+  await Promise.all([loadGovernance(), loadEnterpriseOverview()])
+}
+
+async function resolveModerationCase(row: ContentModerationCaseView, decision: string) {
+  await api.enterpriseResolveModerationCase(row.id, { decision, status: 'RESOLVED', actionNote: `运营后台处理：${decision}` })
+  ElMessage.success('审核案件已处理')
+  await Promise.all([loadGovernance(), loadPosts(), loadEnterpriseOverview()])
+}
+
+async function createAccountAction() {
+  if (!accountActionForm.userId) return ElMessage.warning('用户 ID 不能为空')
+  await api.enterpriseCreateAccountAction(accountActionForm as { userId: number; actionType: string; reason?: string })
+  Object.assign(accountActionForm, { userId: undefined, actionType: 'WARN', reason: '' })
+  ElMessage.success('账号处置已创建')
+  await loadGovernance()
+}
+
+async function upsertCreator() {
+  if (!creatorForm.userId) return ElMessage.warning('用户 ID 不能为空')
+  await api.enterpriseUpsertCreator(creatorForm as { userId: number })
+  Object.assign(creatorForm, { userId: undefined, domainTags: '', creatorLevel: 'SEED', qualityScore: 0, monetizationStatus: 'DISABLED' })
+  ElMessage.success('创作者档案已保存')
+  await Promise.all([loadCreatorsAndCommercial(), loadEnterpriseOverview()])
+}
+
+async function upsertCommercialContent() {
+  if (!commercialForm.postId) return ElMessage.warning('内容 ID 不能为空')
+  await api.enterpriseUpsertCommercialContent(commercialForm as { postId: number })
+  Object.assign(commercialForm, { postId: undefined, brandName: '', disclosureType: 'NONE', campaignCode: '', status: 'DRAFT', budgetCents: 0, landingUrl: '' })
+  ElMessage.success('商业内容档案已保存')
+  await Promise.all([loadCreatorsAndCommercial(), loadEnterpriseOverview()])
+}
+
 function removeImportImage(url: string) {
   itemForm.imageUrls = itemForm.imageUrls.filter((item) => item !== url)
 }
@@ -664,6 +793,9 @@ function tagType(status?: string) {
           { key: 'imports', label: '导入' },
           { key: 'rebuild', label: '重建' },
           { key: 'recommendation', label: '推荐' },
+          { key: 'models', label: '模型' },
+          { key: 'governance', label: '治理' },
+          { key: 'creators', label: '创作者' },
         ]"
         :key="item.key"
         type="button"
@@ -1162,6 +1294,180 @@ function tagType(status?: string) {
           </div>
         </div>
       </section>
+
+      <section v-show="activeTab === 'models'" class="admin-panel">
+        <div class="admin-panel__head">
+          <div>
+            <h2>训练与模型</h2>
+            <p>登记训练数据集、模型版本和离线评估报告，为后续 Shadow、A/B 和回滚做准备。</p>
+          </div>
+          <strong v-if="enterpriseOverview">数据集 {{ enterpriseOverview.datasets }} · 模型 {{ enterpriseOverview.models }}</strong>
+        </div>
+
+        <div class="admin-enterprise-grid">
+          <div class="admin-enterprise-editor">
+            <h3>训练数据集</h3>
+            <el-input v-model="datasetForm.name" placeholder="数据集名称" />
+            <el-input v-model="datasetForm.filePath" placeholder="离线文件路径" />
+            <div class="admin-import-editor__row">
+              <el-select v-model="datasetForm.datasetType"><el-option label="排序" value="RANKING" /><el-option label="召回" value="RECALL" /></el-select>
+              <el-select v-model="datasetForm.status"><el-option label="草稿" value="DRAFT" /><el-option label="可用" value="READY" /></el-select>
+            </div>
+            <div class="admin-import-editor__row">
+              <el-input-number v-model="datasetForm.rowCount" :min="0" placeholder="总样本" />
+              <el-input-number v-model="datasetForm.positiveCount" :min="0" placeholder="正样本" />
+            </div>
+            <el-button type="primary" :icon="Plus" @click="createDataset">登记数据集</el-button>
+          </div>
+
+          <div class="admin-enterprise-editor">
+            <h3>模型版本</h3>
+            <el-input v-model="modelForm.modelName" placeholder="模型名称" />
+            <el-input v-model="modelForm.version" placeholder="版本号" />
+            <el-input v-model="modelForm.artifactUri" placeholder="模型产物 URI" />
+            <div class="admin-import-editor__row">
+              <el-input-number v-model="modelForm.datasetId" :min="1" placeholder="datasetId" />
+              <el-input-number v-model="modelForm.trafficPercent" :min="0" :max="100" :step="1" placeholder="流量%" />
+            </div>
+            <div class="admin-tags">
+              <el-switch v-model="modelForm.shadowEnabled" active-text="Shadow" />
+              <el-switch v-model="modelForm.onlineEnabled" active-text="Online" />
+            </div>
+            <el-button type="primary" :icon="Plus" @click="createModel">登记模型</el-button>
+          </div>
+
+          <div class="admin-enterprise-editor">
+            <h3>评估报告</h3>
+            <div class="admin-import-editor__row">
+              <el-input-number v-model="evalForm.modelVersionId" :min="1" placeholder="modelId" />
+              <el-input-number v-model="evalForm.datasetId" :min="1" placeholder="datasetId" />
+            </div>
+            <div class="admin-import-editor__row">
+              <el-input-number v-model="evalForm.auc" :min="0" :max="1" :step="0.01" placeholder="AUC" />
+              <el-input-number v-model="evalForm.ndcg" :min="0" :max="1" :step="0.01" placeholder="NDCG" />
+            </div>
+            <el-input v-model="evalForm.reportPath" placeholder="报告路径" />
+            <el-button type="primary" :icon="Plus" @click="createEvalReport">记录评估</el-button>
+          </div>
+        </div>
+
+        <div class="admin-triple-table">
+          <el-table :data="datasetRows" class="admin-table" height="300">
+            <el-table-column label="数据集" min-width="180"><template #default="{ row }"><strong>{{ row.name }}</strong><p>{{ row.datasetType }} · {{ row.status }}</p></template></el-table-column>
+            <el-table-column label="样本" width="120"><template #default="{ row }">{{ row.positiveCount || 0 }}/{{ row.rowCount || 0 }}</template></el-table-column>
+          </el-table>
+          <el-table :data="modelRows" class="admin-table" height="300">
+            <el-table-column label="模型" min-width="180"><template #default="{ row }"><strong>{{ row.modelName }}</strong><p>{{ row.version }} · {{ row.status }}</p></template></el-table-column>
+            <el-table-column label="操作" width="150"><template #default="{ row }"><el-button link type="success" @click="updateModelStatus(row, 'READY')">Ready</el-button><el-button link type="warning" @click="updateModelStatus(row, 'SHADOW')">Shadow</el-button></template></el-table-column>
+          </el-table>
+          <el-table :data="evalRows" class="admin-table" height="300">
+            <el-table-column label="评估" min-width="180"><template #default="{ row }"><strong>model {{ row.modelVersionId }}</strong><p>AUC {{ row.auc || 0 }} · NDCG {{ row.ndcg || 0 }}</p></template></el-table-column>
+            <el-table-column label="状态" width="100" prop="status" />
+          </el-table>
+        </div>
+      </section>
+
+      <section v-show="activeTab === 'governance'" class="admin-panel">
+        <div class="admin-panel__head">
+          <div>
+            <h2>审核治理</h2>
+            <p>处理内容举报、下架/通过内容，并记录账号警告、禁言、限流和封禁。</p>
+          </div>
+          <strong v-if="enterpriseOverview">待处理 {{ enterpriseOverview.openModerationCases }}</strong>
+        </div>
+
+        <div class="admin-enterprise-grid admin-enterprise-grid--two">
+          <div class="admin-enterprise-editor">
+            <h3>新建审核案件</h3>
+            <el-input-number v-model="moderationForm.postId" :min="1" placeholder="内容 ID" />
+            <el-input v-model="moderationForm.reason" placeholder="原因" />
+            <div class="admin-import-editor__row">
+              <el-select v-model="moderationForm.priority"><el-option label="普通" value="NORMAL" /><el-option label="高" value="HIGH" /></el-select>
+              <el-select v-model="moderationForm.riskLevel"><el-option label="普通" value="NORMAL" /><el-option label="举报" value="REPORTED" /><el-option label="高风险" value="HIGH" /></el-select>
+            </div>
+            <el-button type="primary" :icon="Plus" @click="createModerationCase">创建案件</el-button>
+          </div>
+          <div class="admin-enterprise-editor">
+            <h3>账号处置</h3>
+            <el-input-number v-model="accountActionForm.userId" :min="1" placeholder="用户 ID" />
+            <el-select v-model="accountActionForm.actionType">
+              <el-option label="警告" value="WARN" />
+              <el-option label="禁言" value="MUTE" />
+              <el-option label="限流" value="LIMIT" />
+              <el-option label="封禁" value="BAN" />
+              <el-option label="恢复" value="RESTORE" />
+            </el-select>
+            <el-input v-model="accountActionForm.reason" placeholder="处置原因" />
+            <el-button type="danger" :icon="Check" @click="createAccountAction">记录处置</el-button>
+          </div>
+        </div>
+
+        <div class="admin-reco-layout">
+          <el-table :data="moderationRows" class="admin-table" height="430">
+            <el-table-column label="案件" min-width="220"><template #default="{ row }"><strong>#{{ row.id }} 内容 {{ row.postId }}</strong><p>{{ row.reason }}</p></template></el-table-column>
+            <el-table-column label="状态" width="110"><template #default="{ row }"><el-tag :type="tagType(row.status)">{{ row.status }}</el-tag></template></el-table-column>
+            <el-table-column label="操作" width="190"><template #default="{ row }"><el-button link type="success" @click="resolveModerationCase(row, 'APPROVE')">通过</el-button><el-button link type="danger" @click="resolveModerationCase(row, 'REMOVE')">下架</el-button></template></el-table-column>
+          </el-table>
+          <el-table :data="accountActionRows" class="admin-table" height="430">
+            <el-table-column label="账号" width="100" prop="userId" />
+            <el-table-column label="动作" width="120" prop="actionType" />
+            <el-table-column label="原因" min-width="200" prop="reason" />
+            <el-table-column label="状态" width="110"><template #default="{ row }"><el-tag :type="tagType(row.status)">{{ row.status }}</el-tag></template></el-table-column>
+          </el-table>
+        </div>
+      </section>
+
+      <section v-show="activeTab === 'creators'" class="admin-panel">
+        <div class="admin-panel__head">
+          <div>
+            <h2>创作者与商业化</h2>
+            <p>维护创作者等级、质量分、变现状态和商业内容披露，先做识别和治理，不强推广告。</p>
+          </div>
+          <strong v-if="enterpriseOverview">创作者 {{ enterpriseOverview.creators }} · 商业内容 {{ enterpriseOverview.commercialPosts }}</strong>
+        </div>
+
+        <div class="admin-enterprise-grid admin-enterprise-grid--two">
+          <div class="admin-enterprise-editor">
+            <h3>创作者档案</h3>
+            <el-input-number v-model="creatorForm.userId" :min="1" placeholder="用户 ID" />
+            <el-input v-model="creatorForm.domainTags" placeholder="领域标签，逗号分隔" />
+            <div class="admin-import-editor__row">
+              <el-select v-model="creatorForm.creatorLevel"><el-option label="种子" value="SEED" /><el-option label="成长" value="GROWTH" /><el-option label="专业" value="PRO" /></el-select>
+              <el-input-number v-model="creatorForm.qualityScore" :min="0" :max="1" :step="0.05" />
+            </div>
+            <el-select v-model="creatorForm.monetizationStatus"><el-option label="关闭" value="DISABLED" /><el-option label="待审核" value="PENDING" /><el-option label="开启" value="ENABLED" /></el-select>
+            <el-button type="primary" :icon="Check" @click="upsertCreator">保存创作者</el-button>
+          </div>
+          <div class="admin-enterprise-editor">
+            <h3>商业内容</h3>
+            <el-input-number v-model="commercialForm.postId" :min="1" placeholder="内容 ID" />
+            <el-input v-model="commercialForm.brandName" placeholder="品牌名称" />
+            <el-input v-model="commercialForm.campaignCode" placeholder="活动编码" />
+            <div class="admin-import-editor__row">
+              <el-select v-model="commercialForm.disclosureType"><el-option label="无" value="NONE" /><el-option label="广告" value="AD" /><el-option label="合作" value="SPONSOR" /></el-select>
+              <el-select v-model="commercialForm.status"><el-option label="草稿" value="DRAFT" /><el-option label="审核" value="REVIEW" /><el-option label="可用" value="ACTIVE" /></el-select>
+            </div>
+            <el-input-number v-model="commercialForm.budgetCents" :min="0" placeholder="预算分" />
+            <el-button type="primary" :icon="Check" @click="upsertCommercialContent">保存商业内容</el-button>
+          </div>
+        </div>
+
+        <div class="admin-reco-layout">
+          <el-table :data="creatorRows" class="admin-table" height="430">
+            <el-table-column label="创作者" width="100" prop="userId" />
+            <el-table-column label="等级/质量" width="150"><template #default="{ row }">{{ row.creatorLevel }} / {{ row.qualityScore || 0 }}</template></el-table-column>
+            <el-table-column label="领域" min-width="220" prop="domainTags" />
+            <el-table-column label="变现" width="120" prop="monetizationStatus" />
+          </el-table>
+          <el-table :data="commercialRows" class="admin-table" height="430">
+            <el-table-column label="内容" width="100" prop="postId" />
+            <el-table-column label="品牌" width="150" prop="brandName" />
+            <el-table-column label="披露" width="100" prop="disclosureType" />
+            <el-table-column label="活动" min-width="160" prop="campaignCode" />
+            <el-table-column label="状态" width="110"><template #default="{ row }"><el-tag :type="tagType(row.status)">{{ row.status }}</el-tag></template></el-table-column>
+          </el-table>
+        </div>
+      </section>
     </main>
 
     <el-dialog v-model="channelDialogVisible" :title="editingChannelCode ? '编辑频道' : '新建频道'" width="720px">
@@ -1646,6 +1952,36 @@ function tagType(status?: string) {
   gap: 18px;
 }
 
+.admin-enterprise-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.admin-enterprise-grid--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-enterprise-editor {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f8f9fb;
+}
+
+.admin-enterprise-editor h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.admin-triple-table {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .admin-import-editor__row {
   display: grid;
   grid-template-columns: 190px minmax(0, 1fr);
@@ -1775,6 +2111,12 @@ function tagType(status?: string) {
   }
 
   .admin-reco-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-enterprise-grid,
+  .admin-enterprise-grid--two,
+  .admin-triple-table {
     grid-template-columns: 1fr;
   }
 }
