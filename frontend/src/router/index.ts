@@ -11,7 +11,6 @@ const ChannelView = () => import('../views/ChannelView.vue')
 const SearchDiscoverView = () => import('../views/SearchDiscoverView.vue')
 const AdminView = () => import('../views/AdminView.vue')
 const MessagesView = () => import('../views/MessagesView.vue')
-const NotificationsView = () => import('../views/NotificationsView.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -61,7 +60,7 @@ const router = createRouter({
     {
       path: '/notifications',
       name: 'notifications',
-      component: NotificationsView,
+      redirect: { name: 'messages', query: { tab: 'notifications' } },
       meta: { requiresAuth: true },
     },
     {

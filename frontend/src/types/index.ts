@@ -147,6 +147,34 @@ export interface FollowStatus {
   following: boolean
 }
 
+export interface MessageSummaryResponse {
+  unreadDirect: number
+  unreadNotifications: number
+  unreadTotal: number
+}
+
+export interface MessageConversationView {
+  peerId: number
+  peer: UserSummary
+  lastMessage: string
+  lastMessageAt?: string
+  unreadCount: number
+  messageCount: number
+}
+
+export interface MessageItemView {
+  id: number
+  kind: 'DIRECT' | 'INTERACTION' | 'SYSTEM' | string
+  title?: string
+  content: string
+  actionUrl?: string
+  sender?: UserSummary
+  recipient?: UserSummary
+  fromMe: boolean
+  read: boolean
+  createdAt: string
+}
+
 export interface PageResponse<T> {
   records: T[]
   total: number

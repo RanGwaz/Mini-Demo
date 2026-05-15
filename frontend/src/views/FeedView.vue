@@ -177,9 +177,7 @@ const recommendationName = computed(() => authStore.currentUser?.nickname || aut
 const recommendationAvatar = computed(() => normalizeMediaUrl(authStore.currentUser?.avatarUrl) || 'https://api.dicebear.com/9.x/adventurer/svg?seed=vibelo-user')
 const recommendationInterests = computed(() => audienceSegments.value.slice(0, 4))
 const recommendationLeadPost = computed(() => isForYouChannel.value ? posts.value[0] : null)
-const recommendationSidePosts = computed(() => isForYouChannel.value ? posts.value.slice(1, 4) : [])
-const recommendationGuessPosts = computed(() => isForYouChannel.value ? posts.value.slice(1, 6) : [])
-const feedStreamPosts = computed(() => isForYouChannel.value ? posts.value.slice(6) : posts.value)
+const feedStreamPosts = computed(() => posts.value)
 const masonryColumns = computed(() => distributeIntoColumns(feedStreamPosts.value))
 const interestCandidateFacets = computed<UserInterestFacetView[]>(() => {
   const channelFacets = audienceSegments.value.map((item) => ({
@@ -428,6 +426,10 @@ function postMatchesFeedMode(post: PostView) {
 
 function filterRecordsByActiveScope(records: PostView[]) {
   return records.filter((post) => postMatchesFeedMode(post) && postMatchesCurrentChannel(post))
+}
+
+function filterRecordsByActiveChannel(records: PostView[]) {
+  return records.filter(postMatchesCurrentChannel)
 }
 
 function navigationType() {
@@ -1113,6 +1115,21 @@ async function requestFeedPage(page: number, requestSize = currentFeedPageSize()
     }
   }
 
+  if (isFollowingFeedMode() || isFriendsFeedMode()) {
+    const mode = isFriendsFeedMode() ? 'friends' : 'following'
+    const data = await api.socialFeed(mode, page, requestSize)
+    const records = activeChannel.value === 'all'
+      ? data.records || []
+      : filterRecordsByActiveChannel(data.records || [])
+    return {
+      ...data,
+      records,
+      requestSize,
+      consumedPages: 1,
+      sourceHasMore: computeServerHasMore(page, requestSize, data.records || [], data.total),
+    }
+  }
+
   await ensureFeedScopeDependencies()
 
   const needExtraScan = isFollowingFeedMode() || isFriendsFeedMode() || activeChannel.value !== 'all'
@@ -1169,9 +1186,12 @@ async function loadInitialFeed() {
     posts.value = []
     queueFeedBatch(dedupeRecords(data.records || []).slice(0, FEED_MAX_ITEMS), initialVisibleCount())
     total.value = typeof data.total === 'number' ? data.total : null
-    feedNextPage.value = 2
+    feedNextPage.value = 1 + Math.max(1, Number(data.consumedPages || 1))
     prefetchedFeedPage.value = null
-    feedHasMore.value = (data.records || []).length >= requestSize
+    const serverHasMore = typeof data.sourceHasMore === 'boolean'
+      ? data.sourceHasMore
+      : computeServerHasMore(1, requestSize, data.records || [], data.total)
+    feedHasMore.value = serverHasMore
       && posts.value.length < FEED_MAX_ITEMS
       && (typeof data.total !== 'number' || posts.value.length < data.total)
     saveFeedToCache()
@@ -1618,8 +1638,14 @@ onUnmounted(() => {
             :style="{ '--column-count': String(columnCount) }">
             <div v-for="(column, columnIndex) in skeletonColumns" :key="`feed-skeleton-column-${columnIndex}`"
               class="feed-home__column">
-              <div v-for="item in column" :key="item.key" class="feed-home__skeleton-card ui-skeleton"
-                :style="{ aspectRatio: item.aspectRatio }" />
+              <div v-for="item in column" :key="item.key" class="feed-home__skeleton-card">
+                <div class="feed-home__skeleton-media ui-skeleton" :style="{ aspectRatio: item.aspectRatio }" />
+                <div class="feed-home__skeleton-body">
+                  <span class="feed-home__skeleton-line ui-skeleton" />
+                  <span class="feed-home__skeleton-line feed-home__skeleton-line--short ui-skeleton" />
+                  <span class="feed-home__skeleton-line feed-home__skeleton-line--mini ui-skeleton" />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1629,50 +1655,6 @@ onUnmounted(() => {
           </div>
 
           <div v-else-if="posts.length > 0" class="feed-home__stream">
-            <section v-if="isForYouChannel && recommendationLeadPost" class="feed-home__recommend-overview">
-              <div class="feed-home__recommend-lead">
-                <FeedCardRenderer
-                  :post="recommendationLeadPost"
-                  :is-liked="isPostLiked(recommendationLeadPost.id)"
-                  :is-liking="isPostLiking(recommendationLeadPost.id)"
-                  :like-count="displayedLikeCount(recommendationLeadPost)"
-                  @open="navigateToPost"
-                  @like="handleTogglePostLike"
-                />
-              </div>
-
-              <div class="feed-home__recommend-stack">
-                <article
-                  v-for="(post, index) in recommendationSidePosts"
-                  :key="`side-${post.id}`"
-                  @click="navigateToPost(post)"
-                >
-                  <span>{{ index === 0 ? '继续浏览' : index === 1 ? '热门讨论' : '今日灵感' }}</span>
-                  <strong>{{ post.title || '值得继续看的内容' }}</strong>
-                  <small>{{ post.author.nickname }} · {{ post.channelCode || post.channel }}</small>
-                </article>
-              </div>
-            </section>
-
-            <section v-if="isForYouChannel && recommendationGuessPosts.length > 0" class="feed-home__guess-section">
-              <header>
-                <h2>猜你喜欢</h2>
-                <button type="button" @click="reloadFeedByScope">换一换</button>
-              </header>
-              <div class="feed-home__guess-row">
-                <FeedCardRenderer
-                  v-for="post in recommendationGuessPosts"
-                  :key="`guess-${post.id}`"
-                  :post="post"
-                  :is-liked="isPostLiked(post.id)"
-                  :is-liking="isPostLiking(post.id)"
-                  :like-count="displayedLikeCount(post)"
-                  @open="navigateToPost"
-                  @like="handleTogglePostLike"
-                />
-              </div>
-            </section>
-
             <section class="feed-home__waterfall" :style="{ '--column-count': String(columnCount) }">
               <div v-for="(column, columnIndex) in masonryColumns" :key="`col-${columnIndex}`"
                 class="feed-home__column">
@@ -2619,9 +2601,40 @@ onUnmounted(() => {
 }
 
 .feed-home__skeleton-card {
+  overflow: hidden;
   width: 100%;
-  min-height: 0;
-  border-radius: 8px;
+  border: 1px solid #e8ebf0;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 6px 18px rgba(32, 36, 47, 0.05);
+}
+
+.feed-home__skeleton-media {
+  width: 100%;
+  min-height: 132px;
+  border-radius: 12px 12px 0 0;
+}
+
+.feed-home__skeleton-body {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px 14px;
+}
+
+.feed-home__skeleton-line {
+  display: block;
+  width: 84%;
+  height: 14px;
+  border-radius: 999px;
+}
+
+.feed-home__skeleton-line--short {
+  width: 62%;
+}
+
+.feed-home__skeleton-line--mini {
+  width: 42%;
+  height: 12px;
 }
 
 .feed-home__sentinel {

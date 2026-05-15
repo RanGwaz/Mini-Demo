@@ -9,6 +9,7 @@ import com.rangwaz.imagesocial.domain.entity.UserFollow;
 import com.rangwaz.imagesocial.domain.mapper.UserBlockMapper;
 import com.rangwaz.imagesocial.domain.mapper.UserFollowMapper;
 import com.rangwaz.imagesocial.event.EventService;
+import com.rangwaz.imagesocial.message.MessageService;
 import com.rangwaz.imagesocial.social.dto.FollowStatusResponse;
 import com.rangwaz.imagesocial.user.UserService;
 import java.util.List;
@@ -23,15 +24,18 @@ public class SocialService {
     private final UserBlockMapper userBlockMapper;
     private final UserService userService;
     private final EventService eventService;
+    private final MessageService messageService;
 
     public SocialService(UserFollowMapper userFollowMapper,
                          UserBlockMapper userBlockMapper,
                          UserService userService,
-                         EventService eventService) {
+                         EventService eventService,
+                         MessageService messageService) {
         this.userFollowMapper = userFollowMapper;
         this.userBlockMapper = userBlockMapper;
         this.userService = userService;
         this.eventService = eventService;
+        this.messageService = messageService;
     }
 
     @Transactional
@@ -53,6 +57,7 @@ public class SocialService {
         eventService.publish("USER_FOLLOW", userId, "USER", followedId, Map.of(
                 "scene", safeScene(scene)
         ));
+        messageService.notifyInteraction(followedId, userId, "新的关注", "开始关注了你", "/users/" + userId);
     }
 
     @Transactional

@@ -25,6 +25,7 @@ import com.rangwaz.imagesocial.interaction.dto.CreateCommentRequest;
 import com.rangwaz.imagesocial.interaction.dto.NegativeFeedbackRequest;
 import com.rangwaz.imagesocial.interaction.dto.PostInteractionStatus;
 import com.rangwaz.imagesocial.interaction.dto.ReportRequest;
+import com.rangwaz.imagesocial.message.MessageService;
 import com.rangwaz.imagesocial.post.PostService;
 import com.rangwaz.imagesocial.user.UserService;
 import java.util.List;
@@ -46,6 +47,7 @@ public class InteractionService {
     private final PostService postService;
     private final UserService userService;
     private final EventService eventService;
+    private final MessageService messageService;
 
     public InteractionService(PostLikeMapper postLikeMapper,
                               PostFavoriteMapper postFavoriteMapper,
@@ -57,7 +59,8 @@ public class InteractionService {
                               UserBlockMapper userBlockMapper,
                               PostService postService,
                               UserService userService,
-                              EventService eventService) {
+                              EventService eventService,
+                              MessageService messageService) {
         this.postLikeMapper = postLikeMapper;
         this.postFavoriteMapper = postFavoriteMapper;
         this.postCommentMapper = postCommentMapper;
@@ -69,11 +72,12 @@ public class InteractionService {
         this.postService = postService;
         this.userService = userService;
         this.eventService = eventService;
+        this.messageService = messageService;
     }
 
     @Transactional
     public void like(Long userId, Long postId) {
-        postService.requirePost(postId);
+        Post post = postService.requirePost(postId);
         Long count = postLikeMapper.selectCount(new LambdaQueryWrapper<PostLike>()
                 .eq(PostLike::getUserId, userId)
                 .eq(PostLike::getPostId, postId));
@@ -86,11 +90,12 @@ public class InteractionService {
         postLikeMapper.insert(postLike);
         postMapper.updateCounters(postId, 1, 0, 0, 0, 3.0d);
         eventService.publish("POST_LIKE", userId, "POST", postId, Map.of());
+        notifyPostOwner(post, userId, "有人点赞了你的帖子", postSnippet(post));
     }
 
     @Transactional
     public boolean toggleLike(Long userId, Long postId) {
-        postService.requirePost(postId);
+        Post post = postService.requirePost(postId);
         int deleted = postLikeMapper.delete(new LambdaQueryWrapper<PostLike>()
                 .eq(PostLike::getUserId, userId)
                 .eq(PostLike::getPostId, postId));
@@ -105,6 +110,7 @@ public class InteractionService {
         postLikeMapper.insert(postLike);
         postMapper.updateCounters(postId, 1, 0, 0, 0, 3.0d);
         eventService.publish("POST_LIKE", userId, "POST", postId, Map.of());
+        notifyPostOwner(post, userId, "有人点赞了你的帖子", postSnippet(post));
         return true;
     }
 
@@ -121,7 +127,7 @@ public class InteractionService {
 
     @Transactional
     public void favorite(Long userId, Long postId) {
-        postService.requirePost(postId);
+        Post post = postService.requirePost(postId);
         Long count = postFavoriteMapper.selectCount(new LambdaQueryWrapper<PostFavorite>()
                 .eq(PostFavorite::getUserId, userId)
                 .eq(PostFavorite::getPostId, postId));
@@ -134,11 +140,12 @@ public class InteractionService {
         postFavoriteMapper.insert(favorite);
         postMapper.updateCounters(postId, 0, 1, 0, 0, 5.0d);
         eventService.publish("POST_FAVORITE", userId, "POST", postId, Map.of());
+        notifyPostOwner(post, userId, "有人收藏了你的帖子", postSnippet(post));
     }
 
     @Transactional
     public boolean toggleFavorite(Long userId, Long postId) {
-        postService.requirePost(postId);
+        Post post = postService.requirePost(postId);
         int deleted = postFavoriteMapper.delete(new LambdaQueryWrapper<PostFavorite>()
                 .eq(PostFavorite::getUserId, userId)
                 .eq(PostFavorite::getPostId, postId));
@@ -153,6 +160,7 @@ public class InteractionService {
         postFavoriteMapper.insert(favorite);
         postMapper.updateCounters(postId, 0, 1, 0, 0, 5.0d);
         eventService.publish("POST_FAVORITE", userId, "POST", postId, Map.of());
+        notifyPostOwner(post, userId, "有人收藏了你的帖子", postSnippet(post));
         return true;
     }
 
@@ -188,6 +196,10 @@ public class InteractionService {
                 "content", request.content(),
                 "parentCommentId", request.parentCommentId() == null ? 0L : request.parentCommentId()
         ));
+        notifyPostOwner(post, userId, "有人评论了你的帖子", request.content());
+        if (parentComment != null && !parentComment.getUserId().equals(post.getAuthorId())) {
+            messageService.notifyInteraction(parentComment.getUserId(), userId, "有人回复了你的评论", request.content(), "/posts/" + postId);
+        }
         UserSummary userSummary = userService.summaryOrPlaceholder(userId);
         UserSummary replyToUser = parentComment == null
                 ? null
@@ -361,5 +373,23 @@ public class InteractionService {
             case "POST_HIDE", "HIDE" -> "POST_HIDE";
             default -> "POST_NEGATIVE_FEEDBACK";
         };
+    }
+
+    private void notifyPostOwner(Post post, Long actorId, String title, String content) {
+        messageService.notifyInteraction(post.getAuthorId(), actorId, title, content, "/posts/" + post.getId());
+    }
+
+    private String postSnippet(Post post) {
+        String value = firstNonBlank(post.getTitle(), post.getContent(), "你的帖子有了新的互动");
+        return value.length() <= 120 ? value : value.substring(0, 120);
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return "";
     }
 }

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import {
   ArrowDown,
-  Bell,
   ChatDotRound,
   EditPen,
   Plus,
@@ -12,9 +11,10 @@ import {
   UserFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AuthWallDialog from './AuthWallDialog.vue'
+import { api } from '../services/api'
 import { useAuthStore } from '../stores/auth'
 import { normalizeMediaUrl } from '../utils/postMedia'
 
@@ -29,6 +29,7 @@ const route = useRoute()
 const authStore = useAuthStore()
 const globalKeyword = ref('')
 const avatarBroken = ref(false)
+const unreadMessages = ref(0)
 
 authStore.hydrate()
 
@@ -69,7 +70,21 @@ function publish() {
 }
 
 function isTopActionActive(path: string) {
+  if (path === '/messages') return route.path.startsWith('/messages') || route.path.startsWith('/notifications')
   return route.path.startsWith(path)
+}
+
+async function loadMessageSummary() {
+  if (!authStore.accessToken) {
+    unreadMessages.value = 0
+    return
+  }
+  try {
+    const summary = await api.messageSummary()
+    unreadMessages.value = summary.unreadTotal
+  } catch {
+    unreadMessages.value = 0
+  }
 }
 
 async function handleAvatarCommand(command: string) {
@@ -106,11 +121,25 @@ watch(
 )
 
 watch(
+  () => [authStore.accessToken, route.fullPath],
+  () => void loadMessageSummary(),
+  { immediate: true },
+)
+
+watch(
   () => authStore.currentUser?.avatarUrl,
   () => {
     avatarBroken.value = false
   },
 )
+
+onMounted(() => {
+  window.addEventListener('message-center:updated', loadMessageSummary)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('message-center:updated', loadMessageSummary)
+})
 </script>
 
 <template>
@@ -152,17 +181,7 @@ watch(
           @click="go('/messages')"
         >
           <el-icon><ChatDotRound /></el-icon>
-          <em>3</em>
-        </button>
-        <button
-          type="button"
-          class="app-shell__icon-action"
-          :class="{ 'is-active': isTopActionActive('/notifications') }"
-          aria-label="通知"
-          @click="go('/notifications')"
-        >
-          <el-icon><Bell /></el-icon>
-          <em>12</em>
+          <em v-if="unreadMessages">{{ unreadMessages > 99 ? '99+' : unreadMessages }}</em>
         </button>
 
         <el-dropdown trigger="click" placement="bottom-end" @command="handleAvatarCommand">

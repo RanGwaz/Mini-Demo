@@ -1,63 +1,63 @@
 # Recommendation Jobs
 
-Recommendation maintenance jobs are managed by Docker Compose scheduler
-containers. This keeps development and later deployment on the same path.
+Recommendation maintenance is intentionally small now. Only the data that the
+current feed path needs continuously is refreshed by a scheduler.
 
-## Canonical model directory
+## Always-on scheduler
 
-The active model directory is:
-
-```text
-infra/docker/models
-```
-
-The inference service reads model artifacts from that directory. The old
-`backend/scripts/models` snapshot directory has been removed.
-
-## Scheduler containers
-
-All scheduler logs are written to:
+Logs are written to:
 
 ```text
-infra/docker/data/reco-jobs
+infra/docker/data/reco-jobs/reco_maintenance.log
 ```
 
-| Service | Frequency | Purpose | Log |
-| --- | ---: | --- | --- |
-| `feature-engineering-scheduler` | 5 minutes | Refresh MySQL/Redis user and post features | `feature_engineering.log` |
-| `embedding-extract-scheduler` | 30 minutes | Extract missing post image embeddings into Milvus | `extract_image_embeddings.log` |
-| `i2i-neighbor-scheduler` | 60 minutes | Refresh collaborative-filtering item neighbors | `build_i2i_neighbors.log` |
-| `user-embedding-scheduler` | 15 minutes | Refresh active user vectors in Milvus | `build_user_embeddings.log` |
-| `semantic-taxonomy-scheduler` | 24 hours | Refresh semantic taxonomy and tag vocabulary | `semantic_taxonomy.log` |
+| Job | Frequency | Why it stays scheduled |
+| --- | ---: | --- |
+| `feature` | 5 minutes | Rebuilds `user_features`, `post_features`, and Redis behavior sequences used by the home feed. |
+| `i2i` | 60 minutes | Rebuilds `post_i2i_neighbors`, which powers collaborative similar-post recall. |
 
-## Development start command
-
-This follows the explicit-service style you are already using and avoids
-starting optional services accidentally:
+Start it with the core infrastructure:
 
 ```powershell
 cd infra\docker
-docker compose up -d mysql redis minio minio-init etcd milvus attu kafka kafka-init feature-engineering-scheduler embedding-extract-scheduler i2i-neighbor-scheduler user-embedding-scheduler semantic-taxonomy-scheduler
+docker compose up -d mysql redis minio minio-init etcd milvus attu kafka kafka-init reco-maintenance-scheduler
 ```
 
-If you also want the Compose-managed inference service, append
-`deep-rank-service` to the command.
+If Kafka is not needed for the current run, you can omit `kafka kafka-init`.
 
-## Production-style start command
+## Manual rebuild jobs
 
-Later, when the project is ready for deployment and you want a shorter command,
-use profiles:
+These jobs are useful, but they are too heavy or too brittle to run forever in
+development. Run them only after importing many new posts or when you want a
+full offline refresh.
 
 ```powershell
 cd infra\docker
-docker compose --profile core --profile feature up -d
+
+# Extract missing post image embeddings into Milvus.
+docker compose run --rm reco-maintenance-scheduler /bin/sh -lc "pip install --no-cache-dir -r requirements-reco-jobs.txt && python extract_image_embeddings.py"
+
+# Rebuild semantic taxonomy and tag vocabulary after embeddings or content changes.
+docker compose run --rm reco-maintenance-scheduler /bin/sh -lc "pip install --no-cache-dir -r requirements-reco-jobs.txt && python build_post_semantics.py && python build_tag_vocabulary.py"
+
+# Optional: precompute user vectors. Deep-rank can compute them on demand, so this is not a default scheduler.
+docker compose run --rm -v ./deep-rank-service:/app/rank -w /app/rank reco-maintenance-scheduler /bin/sh -lc "pip install --no-cache-dir -r requirements.txt && CANDIDATE_MODEL_PATH=/models/candidate_generator.pt python build_user_embeddings.py"
 ```
 
-That starts all services in the `core` and `feature` profiles, including
-`deep-rank-service`.
+## Removed schedulers
 
-## Training
+The old setup had five always-on containers:
 
-Training is intentionally not a Compose scheduler. Run the training script
-manually when you want to generate new model artifacts, then restart the
-inference service so it reloads `infra/docker/models`.
+```text
+feature-engineering-scheduler
+embedding-extract-scheduler
+i2i-neighbor-scheduler
+user-embedding-scheduler
+semantic-taxonomy-scheduler
+```
+
+Those are replaced by `reco-maintenance-scheduler`. The removed containers were
+noisy in development: image embedding tried to fetch MinIO through
+`localhost:9000` from inside its own container, taxonomy depended on those
+embeddings, and user-vector refresh is optional because the inference service
+can compute vectors when cache is missing.

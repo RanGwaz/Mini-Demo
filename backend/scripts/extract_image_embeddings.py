@@ -42,6 +42,12 @@ MILVUS_HOST = os.getenv("MILVUS_HOST", "127.0.0.1")
 MILVUS_PORT = int(os.getenv("MILVUS_PORT", "19530"))
 COLLECTION_NAME = os.getenv("MILVUS_COLLECTION_NAME", "post_embeddings")
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "512"))
+MINIO_INTERNAL_ENDPOINT = os.getenv("MINIO_INTERNAL_ENDPOINT", "").strip().rstrip("/")
+MINIO_PUBLIC_ENDPOINTS = [
+    item.strip().rstrip("/")
+    for item in os.getenv("MINIO_PUBLIC_ENDPOINTS", "http://localhost:9000,http://127.0.0.1:9000").split(",")
+    if item.strip()
+]
 
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "16"))
 DOWNLOAD_TIMEOUT = int(os.getenv("DOWNLOAD_TIMEOUT", "15"))
@@ -150,6 +156,7 @@ def already_indexed(collection: Collection) -> Set[int]:
 
 
 def download_image(url: str):
+    url = normalize_image_url(url)
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             resp = requests.get(url, timeout=DOWNLOAD_TIMEOUT)
@@ -160,6 +167,16 @@ def download_image(url: str):
             if attempt < MAX_RETRIES:
                 time.sleep(2)
     return None
+
+
+def normalize_image_url(url: str) -> str:
+    raw = (url or "").strip()
+    if not raw or not MINIO_INTERNAL_ENDPOINT:
+        return raw
+    for public_endpoint in MINIO_PUBLIC_ENDPOINTS:
+        if raw.startswith(public_endpoint + "/"):
+            return MINIO_INTERNAL_ENDPOINT + raw[len(public_endpoint):]
+    return raw
 
 
 def load_clip():

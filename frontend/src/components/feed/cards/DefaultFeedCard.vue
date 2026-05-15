@@ -36,7 +36,20 @@ watch(() => props.post.id, () => {
 
 const extra = computed(() => props.post.extra || {})
 const mediaUrl = computed(() => getPostMediaUrl(props.post) || DEFAULT_IMAGE_PLACEHOLDER)
-const shouldShowMedia = computed(() => hasPostMedia(props.post) && !imageFailed.value && props.variant !== 'tech')
+const displayMediaUrl = computed(() => imageFailed.value ? DEFAULT_IMAGE_PLACEHOLDER : mediaUrl.value)
+const shouldShowMedia = computed(() => hasPostMedia(props.post))
+const mediaAspectRatio = computed(() => {
+  const asset = props.post.assets?.find((item) => Number(item.width) > 0 && Number(item.height) > 0)
+    || props.post.images?.find((item) => Number(item.width) > 0 && Number(item.height) > 0)
+  const width = Number(asset?.width || 0)
+  const height = Number(asset?.height || 0)
+  if (width > 0 && height > 0 && height / width <= 2.4 && height / width >= 0.45) {
+    return `${width} / ${height}`
+  }
+  if (props.variant === 'photography') return '3 / 4'
+  if (props.variant === 'tech') return '16 / 10'
+  return '3 / 3.8'
+})
 const channelCode = computed(() => props.post.channelCode || props.post.channel || 'general')
 const channelLabel = computed(() => {
   switch (channelCode.value) {
@@ -114,17 +127,17 @@ function formatCount(value?: number | null) {
 
 <template>
   <article class="channel-card" :class="`channel-card--${variant}`" @click="emit('open', post)">
-    <div v-if="shouldShowMedia" class="channel-card__media">
+    <div v-if="shouldShowMedia" class="channel-card__media" :style="{ aspectRatio: mediaAspectRatio }">
       <div v-if="!imageVisible" class="channel-card__skeleton ui-skeleton" />
       <img
         class="channel-card__image"
-        :class="{ 'is-visible': imageVisible }"
-        :src="mediaUrl"
+        :class="{ 'is-visible': imageVisible || imageFailed }"
+        :src="displayMediaUrl"
         :alt="post.title || 'post image'"
         loading="lazy"
         decoding="async"
         @load="imageVisible = true"
-        @error="imageFailed = true"
+        @error="imageFailed = true; imageVisible = true"
       />
     </div>
 
@@ -191,6 +204,7 @@ function formatCount(value?: number | null) {
   display: grid;
   overflow: hidden;
   min-height: 132px;
+  max-height: 420px;
   background: #f0f2f5;
 }
 
@@ -202,8 +216,7 @@ function formatCount(value?: number | null) {
 .channel-card__image {
   display: block;
   width: 100%;
-  min-height: 132px;
-  max-height: 420px;
+  height: 100%;
   object-fit: cover;
   opacity: 0;
   transition: opacity 0.22s ease, transform 0.36s ease;
@@ -357,7 +370,7 @@ function formatCount(value?: number | null) {
   padding-top: 14px;
 }
 
-.channel-card--photography .channel-card__image {
+.channel-card--photography .channel-card__media {
   min-height: 180px;
 }
 

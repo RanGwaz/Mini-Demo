@@ -88,7 +88,7 @@ app:
       enabled: ${DEEP_RANK_ENABLED:true}
       endpoint: ${DEEP_RANK_ENDPOINT:http://localhost:18080/infer/rank}
       recall-endpoint: ${DEEP_RECALL_ENDPOINT:http://localhost:18080/infer/recall}
-      timeout-ms: ${DEEP_RANK_TIMEOUT_MS:1200}
+      timeout-ms: ${DEEP_RANK_TIMEOUT_MS:750}
       auth-token: ${DEEP_RANK_AUTH_TOKEN:}
     online-interest:
       decay-enabled: ${ONLINE_INTEREST_DECAY_ENABLED:true}

@@ -219,14 +219,16 @@ services:
       timeout: 5s
       retries: 20
 
-  feature-engineering-scheduler:
+  reco-maintenance-scheduler:
     image: python:3.11-slim
-    container_name: image-social-feature-engineering-scheduler
+    container_name: image-social-reco-maintenance-scheduler
     profiles: ["feature"]
     working_dir: /app/scripts
     volumes:
       - ../../backend/scripts:/app/scripts
+      - ./models:/models
       - ./data/reco-jobs:/app/logs
+      - ./data/hf-cache:/root/.cache/huggingface
     environment:
       TZ: Asia/Shanghai
       MYSQL_HOST: mysql
@@ -237,6 +239,14 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_DB: 0
+      MILVUS_HOST: milvus
+      MILVUS_PORT: 19530
+      MINIO_INTERNAL_ENDPOINT: http://minio:9000
+      TAG_VOCAB_OUT: /models/tag_vocabulary.json
+      I2I_LOOKBACK_DAYS: 30
+      I2I_TOP_N: 100
+      RECO_FEATURE_INTERVAL_SECONDS: 300
+      RECO_I2I_INTERVAL_SECONDS: 3600
       PYTHONUNBUFFERED: "1"
     depends_on:
       mysql:
@@ -245,156 +255,8 @@ services:
         condition: service_healthy
     command: >
       /bin/sh -c "
-      pip install --no-cache-dir -r requirements-reco-jobs.txt &&
-      while true; do
-        echo \"[$$(date '+%Y-%m-%d %H:%M:%S')] run feature_engineering.py\" | tee -a /app/logs/feature_engineering.log;
-        python feature_engineering.py 2>&1 | tee -a /app/logs/feature_engineering.log;
-        sleep 300;
-      done
-      "
-
-  embedding-extract-scheduler:
-    image: python:3.11-slim
-    container_name: image-social-embedding-extract-scheduler
-    profiles: ["feature"]
-    working_dir: /app/scripts
-    volumes:
-      - ../../backend/scripts:/app/scripts
-      - ./data/reco-jobs:/app/logs
-      - ./data/hf-cache:/root/.cache/huggingface
-    environment:
-      TZ: Asia/Shanghai
-      MYSQL_HOST: mysql
-      MYSQL_PORT: 3306
-      MYSQL_USER: root
-      MYSQL_PASSWORD: root123456
-      MYSQL_DATABASE: image_social
-      MILVUS_HOST: milvus
-      MILVUS_PORT: 19530
-      PYTHONUNBUFFERED: "1"
-    depends_on:
-      mysql:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-      milvus:
-        condition: service_healthy
-    command: >
-      /bin/sh -c "
-      pip install --no-cache-dir -r requirements-reco-jobs.txt &&
-      while true; do
-        echo \"[$$(date '+%Y-%m-%d %H:%M:%S')] run extract_image_embeddings.py\" | tee -a /app/logs/extract_image_embeddings.log;
-        python extract_image_embeddings.py 2>&1 | tee -a /app/logs/extract_image_embeddings.log;
-        sleep 1800;
-      done
-      "
-
-  i2i-neighbor-scheduler:
-    image: python:3.11-slim
-    container_name: image-social-i2i-neighbor-scheduler
-    profiles: ["feature"]
-    working_dir: /app/scripts
-    volumes:
-      - ../../backend/scripts:/app/scripts
-      - ./data/reco-jobs:/app/logs
-    environment:
-      TZ: Asia/Shanghai
-      MYSQL_HOST: mysql
-      MYSQL_PORT: 3306
-      MYSQL_USER: root
-      MYSQL_PASSWORD: root123456
-      MYSQL_DATABASE: image_social
-      I2I_LOOKBACK_DAYS: 30
-      I2I_TOP_N: 100
-      PYTHONUNBUFFERED: "1"
-    depends_on:
-      mysql:
-        condition: service_healthy
-    command: >
-      /bin/sh -c "
-      pip install --no-cache-dir -r requirements-reco-jobs.txt &&
-      while true; do
-        echo \"[$$(date '+%Y-%m-%d %H:%M:%S')] run build_i2i_neighbors.py\" | tee -a /app/logs/build_i2i_neighbors.log;
-        python build_i2i_neighbors.py 2>&1 | tee -a /app/logs/build_i2i_neighbors.log;
-        sleep 3600;
-      done
-      "
-
-  user-embedding-scheduler:
-    image: python:3.11-slim
-    container_name: image-social-user-embedding-scheduler
-    profiles: ["feature"]
-    working_dir: /app/rank
-    volumes:
-      - ./deep-rank-service:/app/rank
-      - ./models:/models
-      - ./data/reco-jobs:/app/logs
-    environment:
-      TZ: Asia/Shanghai
-      MYSQL_HOST: mysql
-      MYSQL_PORT: 3306
-      MYSQL_USER: root
-      MYSQL_PASSWORD: root123456
-      MYSQL_DATABASE: image_social
-      MILVUS_HOST: milvus
-      MILVUS_PORT: 19530
-      MILVUS_COLLECTION: post_embeddings
-      MILVUS_USER_COLLECTION: user_embeddings
-      ACTIVE_USER_HOURS: 6
-      USER_EMBEDDING_SCOPE: auto
-      CANDIDATE_MODEL_PATH: /models/candidate_generator.pt
-      PYTHONUNBUFFERED: "1"
-    depends_on:
-      mysql:
-        condition: service_healthy
-      milvus:
-        condition: service_healthy
-    command: >
-      /bin/sh -c "
-      pip install --no-cache-dir --default-timeout=300 --retries=10 -i https://pypi.tuna.tsinghua.edu.cn/simple --extra-index-url https://download.pytorch.org/whl/cu126 -r requirements.txt &&
-      while true; do
-        echo \"[$$(date '+%Y-%m-%d %H:%M:%S')] run build_user_embeddings.py\" | tee -a /app/logs/build_user_embeddings.log;
-        python build_user_embeddings.py 2>&1 | tee -a /app/logs/build_user_embeddings.log;
-        sleep 900;
-      done
-      "
-
-  semantic-taxonomy-scheduler:
-    image: python:3.11-slim
-    container_name: image-social-semantic-taxonomy-scheduler
-    profiles: ["feature"]
-    working_dir: /app/scripts
-    volumes:
-      - ../../backend/scripts:/app/scripts
-      - ./models:/models
-      - ./data/reco-jobs:/app/logs
-    environment:
-      TZ: Asia/Shanghai
-      MYSQL_HOST: mysql
-      MYSQL_PORT: 3306
-      MYSQL_USER: root
-      MYSQL_PASSWORD: root123456
-      MYSQL_DATABASE: image_social
-      MILVUS_HOST: milvus
-      MILVUS_PORT: 19530
-      MILVUS_COLLECTION: post_embeddings
-      TAG_VOCAB_OUT: /models/tag_vocabulary.json
-      PYTHONUNBUFFERED: "1"
-    depends_on:
-      mysql:
-        condition: service_healthy
-      milvus:
-        condition: service_healthy
-    command: >
-      /bin/sh -c "
-      pip install --no-cache-dir -r requirements-reco-jobs.txt &&
-      while true; do
-        echo \"[$$(date '+%Y-%m-%d %H:%M:%S')] run build_post_semantics.py\" | tee -a /app/logs/semantic_taxonomy.log;
-        python build_post_semantics.py 2>&1 | tee -a /app/logs/semantic_taxonomy.log;
-        echo \"[$$(date '+%Y-%m-%d %H:%M:%S')] run build_tag_vocabulary.py\" | tee -a /app/logs/semantic_taxonomy.log;
-        python build_tag_vocabulary.py 2>&1 | tee -a /app/logs/semantic_taxonomy.log;
-        sleep 86400;
-      done
+      pip install --no-cache-dir -r requirements-reco-maintenance.txt &&
+      python reco_maintenance_scheduler.py 2>&1 | tee -a /app/logs/reco_maintenance.log
       "
 
   deep-rank-service:

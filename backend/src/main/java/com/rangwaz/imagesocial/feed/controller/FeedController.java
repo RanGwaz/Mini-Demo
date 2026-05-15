@@ -107,6 +107,14 @@ public class FeedController {
         return ApiResponse.success(feedService.homeFeed(currentUserId, page, size, seed, topic, style, tag));
     }
 
+    @GetMapping("/social")
+    public ApiResponse<PageResponse<PostView>> social(@RequestParam(defaultValue = "following") String mode,
+                                                      @RequestParam(defaultValue = "1") int page,
+                                                      @RequestParam(defaultValue = "24") int size) {
+        Long currentUserId = SecurityUtils.currentUserIdOrNull();
+        return ApiResponse.success(feedService.socialFeed(currentUserId, mode, page, size));
+    }
+
     @GetMapping("/home/diagnostics")
     public ApiResponse<FeedHomeDiagnosticsResponse> homeDiagnostics(@RequestParam(defaultValue = "1") int page,
                                                                     @RequestParam(defaultValue = "24") int size,

@@ -202,6 +202,16 @@ async function toggleFollow() {
   }
 }
 
+function openDirectMessage() {
+  const userId = targetUserId.value
+  if (!userId) return
+  if (!authStore.currentUser) {
+    authStore.openAuthPrompt('manual')
+    return
+  }
+  void router.push({ path: '/messages', query: { peerId: userId } })
+}
+
 function handleTabChange(tab: ProfileTab) {
   activeTab.value = tab
   if (tab !== 'posts') ElMessage.info(`${tabs.find((item) => item.key === tab)?.label || '该分区'}正在完善中`)
@@ -264,7 +274,7 @@ onMounted(() => {
                       {{ followingAuthor ? '已关注' : '+ 关注' }}
                       <el-icon v-if="followingAuthor"><ArrowDown /></el-icon>
                     </button>
-                    <button type="button" class="is-ghost" @click="ElMessage.info('私信功能正在完善中')">私信</button>
+                    <button type="button" class="is-ghost" @click="openDirectMessage">私信</button>
                     <button type="button" class="icon-btn"><el-icon><MoreFilled /></el-icon></button>
                   </template>
                 </div>

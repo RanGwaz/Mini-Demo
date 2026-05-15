@@ -31,6 +31,11 @@ public interface FeedService {
                                               String styleFilter,
                                               String tagFilter);
 
+    PageResponse<PostView> socialFeed(Long currentUserId,
+                                      String mode,
+                                      int page,
+                                      int size);
+
     PageResponse<PostView> similarPosts(Long currentUserId,
                                         Long postId,
                                         int page,

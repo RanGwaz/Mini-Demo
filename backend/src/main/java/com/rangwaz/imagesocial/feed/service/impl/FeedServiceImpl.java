@@ -58,8 +58,8 @@ public class FeedServiceImpl implements FeedService {
     private static final Pattern TERM_SPLITTER = Pattern.compile("[,|/\\\\>\\s_-]+");
 
     private static final int MAX_FEED_WINDOW = 1000;
-    private static final int MAX_DEEP_RANK_CANDIDATES_FIRST_PAGE = 96;
-    private static final int MAX_DEEP_RANK_CANDIDATES_LATER_PAGE = 60;
+    private static final int MAX_DEEP_RANK_CANDIDATES_FIRST_PAGE = 64;
+    private static final int MAX_DEEP_RANK_CANDIDATES_LATER_PAGE = 48;
     private static final int MAX_DEEP_RANK_PAGE = 4;
     private static final int MAX_SYNC_EXPOSURE_EVENTS_PER_PAGE = 4;
     private static final int MIN_RECALL_CANDIDATES = 120;
@@ -197,6 +197,33 @@ public class FeedServiceImpl implements FeedService {
         return new FeedHomeSnapshotResponse(computation.pageResponse(), computation.diagnostics());
     }
 
+    public PageResponse<PostView> socialFeed(Long currentUserId,
+                                             String mode,
+                                             int page,
+                                             int size) {
+        int safePage = Math.max(1, page);
+        int safeSize = Math.min(100, Math.max(1, size));
+        if (currentUserId == null) {
+            return new PageResponse<>(List.of(), 0, safePage, safeSize);
+        }
+
+        int offset = (safePage - 1) * safeSize;
+        boolean friendsMode = "friends".equalsIgnoreCase(mode);
+        long total = friendsMode
+                ? postMapper.countFriendFeedPosts(currentUserId)
+                : postMapper.countFollowingFeedPosts(currentUserId);
+        List<Post> records = friendsMode
+                ? postMapper.selectFriendFeedPosts(currentUserId, offset, safeSize)
+                : postMapper.selectFollowingFeedPosts(currentUserId, offset, safeSize);
+        String reason = friendsMode ? "Friends update" : "From creators you follow";
+        return new PageResponse<>(
+                postService.toViews(records, post -> reason),
+                total,
+                safePage,
+                safeSize
+        );
+    }
+
     private HomeFeedComputation computeHomeFeed(Long currentUserId,
                                                 int page,
                                                 int size,
@@ -209,10 +236,14 @@ public class FeedServiceImpl implements FeedService {
         long traceStartedAt = System.nanoTime();
         int safePage = Math.max(1, page);
         int safeSize = Math.min(100, Math.max(1, size));
-        int recallMultiplier = safePage <= 1 ? 3 : 2;
+        boolean hasRawSemanticFilter = hasText(topicFilter) || hasText(styleFilter) || hasText(tagFilter);
+        boolean fastFirstPage = safePage == 1 && publishExposure && !includeDiagnostics && !hasRawSemanticFilter;
+        int recallMultiplier = safePage <= 1 ? (fastFirstPage ? 2 : 3) : 2;
+        int minRecallCandidates = fastFirstPage ? Math.max(72, safeSize * 3) : MIN_RECALL_CANDIDATES;
+        int maxRecallCandidates = fastFirstPage ? Math.max(96, safeSize * 5) : MAX_RECALL_CANDIDATES;
         int recallLimit = Math.min(
-                Math.max(safePage * safeSize * recallMultiplier, MIN_RECALL_CANDIDATES),
-                MAX_RECALL_CANDIDATES
+                Math.max(safePage * safeSize * recallMultiplier, minRecallCandidates),
+                Math.min(MAX_RECALL_CANDIDATES, maxRecallCandidates)
         );
         boolean lightPagingMode = safePage > 4;
         String effectiveSeed = normalizeSeed(seed);
@@ -329,7 +360,7 @@ public class FeedServiceImpl implements FeedService {
                     socialQuota,
                     () -> recallService.recallSocial(currentUserId, socialFetchSize)
             );
-            if (!lightPagingMode && hasStrongRecentSignals) {
+            if (!lightPagingMode && hasStrongRecentSignals && !fastFirstPage) {
                 recallAndMergeWithQuota(
                         merged,
                         diagnostics,
@@ -348,7 +379,11 @@ public class FeedServiceImpl implements FeedService {
                         118,
                         recentPositiveFetchSize,
                         recentPositiveQuota,
-                        lightPagingMode ? "light_paging_mode" : "no_recent_positive_signals"
+                        lightPagingMode
+                                ? "light_paging_mode"
+                                : fastFirstPage
+                                ? "fast_first_page_i2i_preferred"
+                                : "no_recent_positive_signals"
                 );
             }
             if (!lightPagingMode && hasStrongRecentSignals) {
@@ -373,7 +408,10 @@ public class FeedServiceImpl implements FeedService {
                         lightPagingMode ? "light_paging_mode" : "no_recent_positive_signals"
                 );
             }
-            if (!lightPagingMode) {
+            boolean shouldRunContentRecall = !fastFirstPage
+                    || !hasStrongRecentSignals
+                    || needsMorePersonalizedRecall(merged, recallLimit, safePage, safeSize);
+            if (!lightPagingMode && shouldRunContentRecall) {
                 recallAndMergeWithQuota(
                         merged,
                         diagnostics,
@@ -414,12 +452,14 @@ public class FeedServiceImpl implements FeedService {
                         80,
                         contentFetchSize,
                         contentQuota,
-                        "light_paging_mode"
+                        lightPagingMode ? "light_paging_mode" : "fast_first_page_enough_candidates"
                 );
             }
             if (!lightPagingMode) {
                 boolean shouldRunOnlineRecall = hasOnlineInterestTerms
-                        && (hasStrongRecentSignals || needsMorePersonalizedRecall(merged, recallLimit, safePage, safeSize));
+                        && (!fastFirstPage
+                        || !hasStrongRecentSignals
+                        || needsMorePersonalizedRecall(merged, recallLimit, safePage, safeSize));
                 if (shouldRunOnlineRecall) {
                     recallAndMergeWithQuota(
                             merged,
@@ -455,7 +495,9 @@ public class FeedServiceImpl implements FeedService {
             }
             if (!lightPagingMode) {
                 boolean shouldRunExplicitRecall = hasExplicitInterestTerms
-                        && (hasStrongRecentSignals || needsMorePersonalizedRecall(merged, recallLimit, safePage, safeSize));
+                        && (!fastFirstPage
+                        || !hasStrongRecentSignals
+                        || needsMorePersonalizedRecall(merged, recallLimit, safePage, safeSize));
                 if (shouldRunExplicitRecall) {
                     recallAndMergeWithQuota(
                             merged,
@@ -1730,6 +1772,10 @@ public class FeedServiceImpl implements FeedService {
             return "feed-" + (System.currentTimeMillis() / 30_000L);
         }
         return seed.trim();
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private List<RankedPost> applySemanticFilter(List<RankedPost> ranked, FeedSemanticFilter filter) {

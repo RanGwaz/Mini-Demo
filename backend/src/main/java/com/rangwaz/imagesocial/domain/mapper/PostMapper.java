@@ -69,6 +69,70 @@ public interface PostMapper extends BaseMapper<Post> {
 
     @Select("""
             <script>
+            SELECT COUNT(*)
+            FROM posts p
+            INNER JOIN user_follows uf ON uf.followed_id = p.author_id
+            WHERE uf.follower_id = #{userId}
+              AND p.visibility = 'PUBLIC'
+              AND p.audit_status = 'APPROVED'
+            </script>
+            """)
+    long countFollowingFeedPosts(@Param("userId") Long userId);
+
+    @Select("""
+            <script>
+            SELECT p.*
+            FROM posts p
+            INNER JOIN user_follows uf ON uf.followed_id = p.author_id
+            WHERE uf.follower_id = #{userId}
+              AND p.visibility = 'PUBLIC'
+              AND p.audit_status = 'APPROVED'
+            ORDER BY p.created_at DESC, p.id DESC
+            LIMIT #{limit} OFFSET #{offset}
+            </script>
+            """)
+    List<Post> selectFollowingFeedPosts(@Param("userId") Long userId,
+                                        @Param("offset") int offset,
+                                        @Param("limit") int limit);
+
+    @Select("""
+            <script>
+            SELECT COUNT(*)
+            FROM posts p
+            INNER JOIN user_follows forward_follow
+              ON forward_follow.followed_id = p.author_id
+             AND forward_follow.follower_id = #{userId}
+            INNER JOIN user_follows back_follow
+              ON back_follow.follower_id = p.author_id
+             AND back_follow.followed_id = #{userId}
+            WHERE p.visibility = 'PUBLIC'
+              AND p.audit_status = 'APPROVED'
+            </script>
+            """)
+    long countFriendFeedPosts(@Param("userId") Long userId);
+
+    @Select("""
+            <script>
+            SELECT p.*
+            FROM posts p
+            INNER JOIN user_follows forward_follow
+              ON forward_follow.followed_id = p.author_id
+             AND forward_follow.follower_id = #{userId}
+            INNER JOIN user_follows back_follow
+              ON back_follow.follower_id = p.author_id
+             AND back_follow.followed_id = #{userId}
+            WHERE p.visibility = 'PUBLIC'
+              AND p.audit_status = 'APPROVED'
+            ORDER BY p.created_at DESC, p.id DESC
+            LIMIT #{limit} OFFSET #{offset}
+            </script>
+            """)
+    List<Post> selectFriendFeedPosts(@Param("userId") Long userId,
+                                     @Param("offset") int offset,
+                                     @Param("limit") int limit);
+
+    @Select("""
+            <script>
             SELECT * FROM posts
             WHERE visibility = 'PUBLIC'
               AND audit_status = 'APPROVED'

@@ -5,6 +5,9 @@ import type {
   ChangeUserNoRequest,
   CommentView,
   HttpMethod,
+  MessageConversationView,
+  MessageItemView,
+  MessageSummaryResponse,
   PageResponse,
   PhoneSmsLoginRequest,
   PostInteractionStatus,
@@ -37,6 +40,7 @@ export interface FeedQueryFilters {
 }
 
 export type FeedRequestAuthMode = 'session' | 'guest'
+export type SocialFeedMode = 'following' | 'friends'
 
 export interface ChannelView {
   code: string
@@ -398,6 +402,11 @@ export const api = {
       },
     }))
   },
+  socialFeed(mode: SocialFeedMode, page = 1, size = 24) {
+    return unwrap<PageResponse<PostView>>(http.get('/api/feed/social', {
+      params: { mode, page, size },
+    }))
+  },
   channels() {
     return unwrap<ChannelView[]>(guestHttp.get('/api/channels'))
   },
@@ -535,6 +544,29 @@ export const api = {
   },
   followStatus(userId: number) {
     return unwrap<FollowStatus>(http.get(`/api/social/follow-status/${userId}`))
+  },
+  messageSummary() {
+    return unwrap<MessageSummaryResponse>(http.get('/api/messages/summary'))
+  },
+  messageConversations(params?: { keyword?: string; page?: number; size?: number }) {
+    return unwrap<PageResponse<MessageConversationView>>(http.get('/api/messages/conversations', { params }))
+  },
+  messageThread(peerId: number, page = 1, size = 80) {
+    return unwrap<PageResponse<MessageItemView>>(http.get(`/api/messages/conversations/${peerId}/thread`, {
+      params: { page, size },
+    }))
+  },
+  sendDirectMessage(peerId: number, content: string) {
+    return unwrap<MessageItemView>(http.post(`/api/messages/conversations/${peerId}`, { content }))
+  },
+  messageNotifications(params?: { type?: 'all' | 'interaction' | 'system'; page?: number; size?: number }) {
+    return unwrap<PageResponse<MessageItemView>>(http.get('/api/messages/notifications', { params }))
+  },
+  markMessageRead(messageId: number) {
+    return unwrap<void>(http.post(`/api/messages/${messageId}/read`))
+  },
+  markAllMessagesRead(box: 'all' | 'direct' | 'notifications' = 'all') {
+    return unwrap<void>(http.post('/api/messages/read-all', null, { params: { box } }))
   },
   like(postId: number) {
     return unwrap<void>(http.post(`/api/interactions/posts/${postId}/like`))

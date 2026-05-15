@@ -35,10 +35,10 @@ public class DeepRankingService {
 
     private static final Logger log = LoggerFactory.getLogger(DeepRankingService.class);
     private static final int DEFAULT_CONNECT_TIMEOUT_MS = 350;
-    private static final int DEFAULT_READ_TIMEOUT_MS = 1200;
+    private static final int DEFAULT_READ_TIMEOUT_MS = 750;
     private static final long RANK_DEGRADE_BACKOFF_MILLIS = 15_000L;
-    private static final int MAX_IN_FLIGHT_RANK_CALLS = 2;
-    private static final int MAX_REMOTE_CANDIDATES = 120;
+    private static final int MAX_IN_FLIGHT_RANK_CALLS = 1;
+    private static final int MAX_REMOTE_CANDIDATES = 72;
 
     private final RecommendationProperties recommendationProperties;
     private final ObjectMapper objectMapper;
@@ -153,7 +153,8 @@ public class DeepRankingService {
     }
 
     private RestTemplate buildRestTemplate(Integer timeoutMs) {
-        int timeout = timeoutMs == null || timeoutMs <= 0 ? DEFAULT_READ_TIMEOUT_MS : timeoutMs;
+        int configuredTimeout = timeoutMs == null || timeoutMs <= 0 ? DEFAULT_READ_TIMEOUT_MS : timeoutMs;
+        int timeout = Math.min(configuredTimeout, DEFAULT_READ_TIMEOUT_MS);
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Math.min(timeout, DEFAULT_CONNECT_TIMEOUT_MS));
         factory.setReadTimeout(timeout);
