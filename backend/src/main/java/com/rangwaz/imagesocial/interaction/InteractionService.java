@@ -3,7 +3,6 @@ package com.rangwaz.imagesocial.interaction;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.rangwaz.imagesocial.auth.dto.UserSummary;
 import com.rangwaz.imagesocial.domain.entity.ContentReport;
-import com.rangwaz.imagesocial.domain.entity.ContentModerationCase;
 import com.rangwaz.imagesocial.domain.entity.Post;
 import com.rangwaz.imagesocial.domain.entity.PostComment;
 import com.rangwaz.imagesocial.domain.entity.PostFavorite;
@@ -11,7 +10,6 @@ import com.rangwaz.imagesocial.domain.entity.PostLike;
 import com.rangwaz.imagesocial.domain.entity.PostNegativeFeedback;
 import com.rangwaz.imagesocial.domain.entity.UserBlock;
 import com.rangwaz.imagesocial.domain.mapper.ContentReportMapper;
-import com.rangwaz.imagesocial.domain.mapper.ContentModerationCaseMapper;
 import com.rangwaz.imagesocial.domain.mapper.PostCommentMapper;
 import com.rangwaz.imagesocial.domain.mapper.PostFavoriteMapper;
 import com.rangwaz.imagesocial.domain.mapper.PostLikeMapper;
@@ -42,7 +40,6 @@ public class InteractionService {
     private final PostMapper postMapper;
     private final PostNegativeFeedbackMapper postNegativeFeedbackMapper;
     private final ContentReportMapper contentReportMapper;
-    private final ContentModerationCaseMapper contentModerationCaseMapper;
     private final UserBlockMapper userBlockMapper;
     private final PostService postService;
     private final UserService userService;
@@ -55,7 +52,6 @@ public class InteractionService {
                               PostMapper postMapper,
                               PostNegativeFeedbackMapper postNegativeFeedbackMapper,
                               ContentReportMapper contentReportMapper,
-                              ContentModerationCaseMapper contentModerationCaseMapper,
                               UserBlockMapper userBlockMapper,
                               PostService postService,
                               UserService userService,
@@ -67,7 +63,6 @@ public class InteractionService {
         this.postMapper = postMapper;
         this.postNegativeFeedbackMapper = postNegativeFeedbackMapper;
         this.contentReportMapper = contentReportMapper;
-        this.contentModerationCaseMapper = contentModerationCaseMapper;
         this.userBlockMapper = userBlockMapper;
         this.postService = postService;
         this.userService = userService;
@@ -316,14 +311,6 @@ public class InteractionService {
         report.setPostId(postId);
         report.setReason(request.reason());
         contentReportMapper.insert(report);
-        ContentModerationCase moderationCase = new ContentModerationCase();
-        moderationCase.setPostId(postId);
-        moderationCase.setReporterId(userId);
-        moderationCase.setReason(request.reason());
-        moderationCase.setStatus("OPEN");
-        moderationCase.setPriority("HIGH");
-        moderationCase.setRiskLevel("REPORTED");
-        contentModerationCaseMapper.insert(moderationCase);
         eventService.publish("POST_REPORT", userId, "POST", postId, Map.of("reason", request.reason()));
     }
 

@@ -5,7 +5,6 @@ import {
   EditPen,
   Plus,
   Search,
-  Setting,
   SwitchButton,
   User,
   UserFilled,
@@ -19,7 +18,7 @@ import { useAuthStore } from '../stores/auth'
 import { normalizeMediaUrl } from '../utils/postMedia'
 
 type NavItem = {
-  key: 'creator' | 'admin'
+  key: 'creator'
   label: string
   path: string
 }
@@ -33,11 +32,8 @@ const unreadMessages = ref(0)
 
 authStore.hydrate()
 
-const isAdmin = computed(() => (authStore.currentUser?.roles ?? '').split(',').map((role) => role.trim()).includes('ROLE_ADMIN'))
-
 const navItems = computed<NavItem[]>(() => [
   { key: 'creator', label: '创作中心', path: '/publish' },
-  ...(isAdmin.value ? [{ key: 'admin' as const, label: '运营后台', path: '/admin' }] : []),
 ])
 const currentAvatarUrl = computed(() => avatarBroken.value ? '' : normalizeMediaUrl(authStore.currentUser?.avatarUrl))
 
@@ -47,7 +43,6 @@ function go(path: string) {
 
 function isNavActive(item: NavItem) {
   if (item.key === 'creator') return route.path.startsWith('/publish')
-  if (item.key === 'admin') return route.path.startsWith('/admin')
   return false
 }
 
@@ -98,10 +93,6 @@ async function handleAvatarCommand(command: string) {
   }
   if (command === 'publish') {
     go('/publish')
-    return
-  }
-  if (command === 'admin') {
-    go('/admin')
     return
   }
   if (command === 'logout') {
@@ -205,10 +196,6 @@ onUnmounted(() => {
               <el-dropdown-item v-if="authStore.currentUser" command="publish">
                 <el-icon><EditPen /></el-icon>
                 发布内容
-              </el-dropdown-item>
-              <el-dropdown-item v-if="isAdmin" command="admin">
-                <el-icon><Setting /></el-icon>
-                运营后台
               </el-dropdown-item>
               <el-dropdown-item v-if="authStore.currentUser" divided command="logout">
                 <el-icon><SwitchButton /></el-icon>
