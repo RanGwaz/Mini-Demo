@@ -1,63 +1,45 @@
 <script setup lang="ts">
 defineOptions({ name: 'MessagesView' })
 
-import {
-  Bell,
-  ChatDotRound,
-  Check,
-  Clock,
-  MoreFilled,
-  Position,
-  Search,
-  User,
-} from '@element-plus/icons-vue'
+import { Bell, ChatDotRound, Check, Clock, Position, Search, User } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import CommonLeftSidebar from '../components/CommonLeftSidebar.vue'
 import { api } from '../services/api'
-import type {
-  MessageConversationView,
-  MessageItemView,
-  MessageSummaryResponse,
-  UserSummary,
-} from '../types'
+import type { MessageConversationView, MessageItemView, MessageSummaryResponse, UserSummary } from '../types'
 import { normalizeMediaUrl } from '../utils/postMedia'
 
-type ActiveBox = 'direct' | 'notifications'
-type NotificationFilter = 'all' | 'interaction' | 'system'
+type ActiveBox = 'direct' | 'interactions'
+type InteractionFilter = 'all' | 'interaction' | 'system'
 
 const route = useRoute()
 const router = useRouter()
 
 const activeBox = ref<ActiveBox>('direct')
-const notificationFilter = ref<NotificationFilter>('all')
+const interactionFilter = ref<InteractionFilter>('all')
 const keyword = ref('')
 const draftMessage = ref('')
 const selectedPeerId = ref<number | null>(null)
 const conversations = ref<MessageConversationView[]>([])
-const notifications = ref<MessageItemView[]>([])
+const interactions = ref<MessageItemView[]>([])
 const thread = ref<MessageItemView[]>([])
 const summary = ref<MessageSummaryResponse>({ unreadDirect: 0, unreadNotifications: 0, unreadTotal: 0 })
 const conversationPage = ref(1)
 const conversationTotal = ref(0)
-const notificationPage = ref(1)
-const notificationTotal = ref(0)
+const interactionPage = ref(1)
+const interactionTotal = ref(0)
 const loadingConversations = ref(false)
-const loadingNotifications = ref(false)
+const loadingInteractions = ref(false)
 const loadingThread = ref(false)
 const sending = ref(false)
 const threadEl = ref<HTMLElement | null>(null)
 
 let keywordTimer: ReturnType<typeof setTimeout> | undefined
 
-const selectedConversation = computed(() => (
-  conversations.value.find((item) => item.peerId === selectedPeerId.value) ?? null
-))
-
+const selectedConversation = computed(() => conversations.value.find((item) => item.peerId === selectedPeerId.value) ?? null)
 const conversationHasMore = computed(() => conversations.value.length < conversationTotal.value)
-const notificationHasMore = computed(() => notifications.value.length < notificationTotal.value)
-const recentNotifications = computed(() => notifications.value.slice(0, 8))
+const interactionHasMore = computed(() => interactions.value.length < interactionTotal.value)
 
 function emitMessageUpdate() {
   window.dispatchEvent(new CustomEvent('message-center:updated'))
@@ -95,23 +77,23 @@ async function loadConversations(reset = false) {
   }
 }
 
-async function loadNotifications(reset = false) {
-  if (loadingNotifications.value) return
-  loadingNotifications.value = true
+async function loadInteractions(reset = false) {
+  if (loadingInteractions.value) return
+  loadingInteractions.value = true
   try {
-    const page = reset ? 1 : notificationPage.value
+    const page = reset ? 1 : interactionPage.value
     const result = await api.messageNotifications({
-      type: notificationFilter.value,
+      type: interactionFilter.value,
       page,
       size: 30,
     })
-    notificationPage.value = page + 1
-    notificationTotal.value = result.total
-    notifications.value = reset ? result.records : [...notifications.value, ...result.records]
+    interactionPage.value = page + 1
+    interactionTotal.value = result.total
+    interactions.value = reset ? result.records : [...interactions.value, ...result.records]
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '通知加载失败')
+    ElMessage.error(error instanceof Error ? error.message : '互动消息加载失败')
   } finally {
-    loadingNotifications.value = false
+    loadingInteractions.value = false
   }
 }
 
@@ -179,11 +161,6 @@ async function sendMessage() {
   }
 }
 
-function openNotifications() {
-  activeBox.value = 'notifications'
-  void router.replace({ path: '/messages', query: { tab: 'notifications' } })
-}
-
 function openDirect() {
   activeBox.value = 'direct'
   void router.replace({
@@ -192,14 +169,19 @@ function openDirect() {
   })
 }
 
+function openInteractions() {
+  activeBox.value = 'interactions'
+  void router.replace({ path: '/messages', query: { tab: 'interactions' } })
+}
+
 async function markAllCurrentRead() {
-  const box = activeBox.value === 'notifications' ? 'notifications' : 'direct'
+  const box = activeBox.value === 'interactions' ? 'notifications' : 'direct'
   try {
     await api.markAllMessagesRead(box)
     if (box === 'direct') {
       conversations.value.forEach((item) => { item.unreadCount = 0 })
     } else {
-      notifications.value.forEach((item) => { item.read = true })
+      interactions.value.forEach((item) => { item.read = true })
     }
     await loadSummary()
     ElMessage.success('已全部标记为已读')
@@ -208,14 +190,14 @@ async function markAllCurrentRead() {
   }
 }
 
-async function handleNotificationClick(item: MessageItemView) {
+async function handleInteractionClick(item: MessageItemView) {
   if (!item.read) {
     try {
       await api.markMessageRead(item.id)
       item.read = true
       await loadSummary()
     } catch {
-      // 标记已读失败不阻断跳转，用户点击仍然应该能到达目标内容。
+      // 点击互动消息时，跳转优先于已读状态更新。
     }
   }
   if (item.actionUrl?.startsWith('/')) {
@@ -223,9 +205,9 @@ async function handleNotificationClick(item: MessageItemView) {
   }
 }
 
-function changeNotificationFilter(type: NotificationFilter) {
-  notificationFilter.value = type
-  void loadNotifications(true)
+function changeInteractionFilter(type: InteractionFilter) {
+  interactionFilter.value = type
+  void loadInteractions(true)
 }
 
 function openProfile(user?: UserSummary) {
@@ -244,8 +226,8 @@ function displayName(user?: UserSummary) {
   return user?.nickname || user?.username || '系统消息'
 }
 
-function notificationTitle(item: MessageItemView) {
-  return item.title || (item.kind === 'SYSTEM' ? '系统通知' : '互动通知')
+function interactionTitle(item: MessageItemView) {
+  return item.title || (item.kind === 'SYSTEM' ? '系统消息' : '互动消息')
 }
 
 function formatTime(value?: string) {
@@ -266,8 +248,8 @@ function formatTime(value?: string) {
 async function applyRouteState() {
   const tab = String(route.query.tab || '')
   const peerId = Number(route.query.peerId)
-  if (tab === 'notifications') {
-    activeBox.value = 'notifications'
+  if (tab === 'notifications' || tab === 'interactions') {
+    activeBox.value = 'interactions'
     return
   }
   activeBox.value = 'direct'
@@ -283,10 +265,6 @@ watch(keyword, () => {
   }, 260)
 })
 
-watch(notificationFilter, () => {
-  void loadNotifications(true)
-})
-
 watch(
   () => [route.query.tab, route.query.peerId],
   () => {
@@ -298,7 +276,7 @@ onMounted(async () => {
   await Promise.all([
     loadSummary(),
     loadConversations(true),
-    loadNotifications(true),
+    loadInteractions(true),
   ])
   await applyRouteState()
 })
@@ -310,101 +288,107 @@ onMounted(async () => {
 
     <main class="message-center__main">
       <section class="message-center__shell">
-        <aside class="message-center__rail">
-          <header class="message-center__rail-head">
+        <aside class="message-center__side">
+          <header class="message-center__side-head">
             <div>
               <span>消息中心</span>
-              <strong>{{ activeBox === 'direct' ? '私信' : '通知' }}</strong>
+              <strong>{{ activeBox === 'direct' ? '聊天' : '互动' }}</strong>
             </div>
-            <button type="button" aria-label="更多">
-              <el-icon><MoreFilled /></el-icon>
+            <button type="button" @click="markAllCurrentRead">
+              <el-icon><Check /></el-icon>
             </button>
           </header>
 
-          <div class="message-center__switch">
-            <button
-              type="button"
-              :class="{ 'is-active': activeBox === 'direct' }"
-              @click="openDirect"
-            >
+          <div class="message-center__tabs">
+            <button type="button" :class="{ 'is-active': activeBox === 'direct' }" @click="openDirect">
               <el-icon><ChatDotRound /></el-icon>
-              私信
+              聊天
               <em v-if="summary.unreadDirect">{{ summary.unreadDirect }}</em>
             </button>
-            <button
-              type="button"
-              :class="{ 'is-active': activeBox === 'notifications' }"
-              @click="openNotifications"
-            >
+            <button type="button" :class="{ 'is-active': activeBox === 'interactions' }" @click="openInteractions">
               <el-icon><Bell /></el-icon>
-              通知
+              互动
               <em v-if="summary.unreadNotifications">{{ summary.unreadNotifications }}</em>
             </button>
           </div>
 
           <label v-if="activeBox === 'direct'" class="message-center__search">
             <el-icon><Search /></el-icon>
-            <input v-model="keyword" placeholder="搜索会话或消息" />
+            <input v-model="keyword" placeholder="搜索聊天" />
           </label>
 
-          <div v-if="activeBox === 'notifications'" class="message-center__filters">
-            <button type="button" :class="{ 'is-active': notificationFilter === 'all' }" @click="changeNotificationFilter('all')">全部</button>
-            <button type="button" :class="{ 'is-active': notificationFilter === 'interaction' }" @click="changeNotificationFilter('interaction')">互动</button>
-            <button type="button" :class="{ 'is-active': notificationFilter === 'system' }" @click="changeNotificationFilter('system')">系统</button>
+          <div v-else class="message-center__filters">
+            <button type="button" :class="{ 'is-active': interactionFilter === 'all' }" @click="changeInteractionFilter('all')">全部</button>
+            <button type="button" :class="{ 'is-active': interactionFilter === 'interaction' }" @click="changeInteractionFilter('interaction')">互动</button>
+            <button type="button" :class="{ 'is-active': interactionFilter === 'system' }" @click="changeInteractionFilter('system')">系统</button>
           </div>
 
-          <div v-if="activeBox === 'direct'" class="message-center__list">
-            <button
-              v-for="item in conversations"
-              :key="item.peerId"
-              type="button"
-              class="message-center__conversation"
-              :class="{ 'is-active': selectedPeerId === item.peerId }"
-              @click="selectPeer(item.peerId)"
-            >
-              <img :src="avatarUrl(item.peer)" alt="" />
-              <span>
-                <strong>{{ displayName(item.peer) }}</strong>
-                <small>{{ item.lastMessage || '还没有消息' }}</small>
-              </span>
-              <time>{{ formatTime(item.lastMessageAt) }}</time>
-              <em v-if="item.unreadCount">{{ item.unreadCount }}</em>
-            </button>
+          <div class="message-center__list">
+            <template v-if="activeBox === 'direct'">
+              <button
+                v-for="item in conversations"
+                :key="item.peerId"
+                type="button"
+                class="message-center__conversation"
+                :class="{ 'is-active': selectedPeerId === item.peerId }"
+                @click="selectPeer(item.peerId)"
+              >
+                <img :src="avatarUrl(item.peer)" alt="" />
+                <span>
+                  <strong>{{ displayName(item.peer) }}</strong>
+                  <small>{{ item.lastMessage || '还没有消息' }}</small>
+                </span>
+                <time>{{ formatTime(item.lastMessageAt) }}</time>
+                <em v-if="item.unreadCount">{{ item.unreadCount }}</em>
+              </button>
 
-            <button
-              v-if="conversationHasMore"
-              type="button"
-              class="message-center__load-more"
-              :disabled="loadingConversations"
-              @click="loadConversations(false)"
-            >
-              {{ loadingConversations ? '加载中...' : '加载更多会话' }}
-            </button>
+              <button
+                v-if="conversationHasMore"
+                type="button"
+                class="message-center__load-more"
+                :disabled="loadingConversations"
+                @click="loadConversations(false)"
+              >
+                {{ loadingConversations ? '加载中...' : '加载更多' }}
+              </button>
 
-            <div v-if="!loadingConversations && conversations.length === 0" class="message-center__empty-small">
-              暂无私信，去作者主页点击“私信”即可开始对话。
-            </div>
-          </div>
+              <div v-if="!loadingConversations && conversations.length === 0" class="message-center__empty-small">
+                暂无聊天，去用户主页点击“私信”开始对话。
+              </div>
+            </template>
 
-          <div v-else class="message-center__list">
-            <button
-              v-for="item in notifications.slice(0, 10)"
-              :key="item.id"
-              type="button"
-              class="message-center__notice-mini"
-              :class="{ 'is-unread': !item.read }"
-              @click="handleNotificationClick(item)"
-            >
-              <span>{{ notificationTitle(item) }}</span>
-              <small>{{ item.content }}</small>
-            </button>
-            <div v-if="!loadingNotifications && notifications.length === 0" class="message-center__empty-small">
-              暂无通知。
-            </div>
+            <template v-else>
+              <button
+                v-for="item in interactions"
+                :key="item.id"
+                type="button"
+                class="message-center__interaction-row"
+                :class="{ 'is-unread': !item.read }"
+                @click="handleInteractionClick(item)"
+              >
+                <span>{{ interactionTitle(item) }}</span>
+                <small>{{ item.content }}</small>
+                <time>{{ formatTime(item.createdAt) }}</time>
+              </button>
+
+              <button
+                v-if="interactionHasMore"
+                type="button"
+                class="message-center__load-more"
+                :disabled="loadingInteractions"
+                @click="loadInteractions(false)"
+              >
+                {{ loadingInteractions ? '加载中...' : '加载更多' }}
+              </button>
+
+              <div v-if="!loadingInteractions && interactions.length === 0" class="message-center__empty-small">
+                暂无关注、点赞、收藏或评论消息。
+              </div>
+            </template>
           </div>
         </aside>
 
-        <section v-if="activeBox === 'direct'" class="message-center__chat">
+        <section v-if="activeBox === 'direct'" class="message-center__panel">
           <header v-if="selectedConversation" class="message-center__chat-head">
             <img :src="avatarUrl(selectedConversation.peer)" alt="" />
             <div>
@@ -417,17 +401,15 @@ onMounted(async () => {
             </button>
           </header>
 
-          <header v-else class="message-center__chat-head is-empty">
+          <header v-else class="message-center__chat-head">
             <div>
-              <strong>选择一个会话</strong>
-              <span>私信、互动通知和系统消息现在都在这里。</span>
+              <strong>选择一个聊天</strong>
+              <span>私信会显示在这里。</span>
             </div>
           </header>
 
           <div ref="threadEl" class="message-center__thread">
-            <div v-if="loadingThread" class="message-center__empty-state">
-              正在加载消息...
-            </div>
+            <div v-if="loadingThread" class="message-center__empty-state">正在加载消息...</div>
             <template v-else-if="thread.length">
               <article
                 v-for="message in thread"
@@ -442,7 +424,7 @@ onMounted(async () => {
             <div v-else class="message-center__empty-state">
               <el-icon><ChatDotRound /></el-icon>
               <strong>还没有聊天记录</strong>
-              <span>发一句轻量的开场白，消息会实时进入会话列表。</span>
+              <span>输入一句话开始聊天。</span>
             </div>
           </div>
 
@@ -459,11 +441,11 @@ onMounted(async () => {
           </footer>
         </section>
 
-        <section v-else class="message-center__notification-board">
-          <header>
+        <section v-else class="message-center__panel message-center__interactions">
+          <header class="message-center__interactions-head">
             <div>
-              <span>统一通知流</span>
-              <strong>所有互动与系统通知</strong>
+              <strong>互动消息</strong>
+              <span>关注、点赞、收藏、评论都会在这里。</span>
             </div>
             <button type="button" @click="markAllCurrentRead">
               <el-icon><Check /></el-icon>
@@ -471,74 +453,45 @@ onMounted(async () => {
             </button>
           </header>
 
-          <div class="message-center__notice-grid">
+          <div class="message-center__interaction-list">
             <article
-              v-for="item in notifications"
+              v-for="item in interactions"
               :key="item.id"
-              class="message-center__notice-card"
+              class="message-center__interaction-card"
               :class="{ 'is-unread': !item.read }"
-              @click="handleNotificationClick(item)"
+              @click="handleInteractionClick(item)"
             >
-              <div class="message-center__notice-icon">
+              <div class="message-center__interaction-icon">
                 <el-icon><Bell /></el-icon>
               </div>
               <div>
-                <strong>{{ notificationTitle(item) }}</strong>
+                <strong>{{ interactionTitle(item) }}</strong>
                 <p>{{ item.content }}</p>
                 <small>
                   <template v-if="item.sender">{{ displayName(item.sender) }} · </template>
+                  <el-icon><Clock /></el-icon>
                   {{ formatTime(item.createdAt) }}
                 </small>
               </div>
             </article>
-          </div>
 
-          <button
-            v-if="notificationHasMore"
-            type="button"
-            class="message-center__load-more is-wide"
-            :disabled="loadingNotifications"
-            @click="loadNotifications(false)"
-          >
-            {{ loadingNotifications ? '加载中...' : '加载更多通知' }}
-          </button>
+            <button
+              v-if="interactionHasMore"
+              type="button"
+              class="message-center__load-more"
+              :disabled="loadingInteractions"
+              @click="loadInteractions(false)"
+            >
+              {{ loadingInteractions ? '加载中...' : '加载更多互动' }}
+            </button>
 
-          <div v-if="!loadingNotifications && notifications.length === 0" class="message-center__empty-state">
-            <el-icon><Bell /></el-icon>
-            <strong>暂无通知</strong>
-            <span>当有人关注你、点赞、收藏或评论你的内容时，会出现在这里。</span>
+            <div v-if="!loadingInteractions && interactions.length === 0" class="message-center__empty-state">
+              <el-icon><Bell /></el-icon>
+              <strong>暂无互动消息</strong>
+              <span>当有人关注、点赞、收藏或评论你的内容时，会出现在这里。</span>
+            </div>
           </div>
         </section>
-
-        <aside v-if="activeBox === 'direct'" class="message-center__notice-rail">
-          <header>
-            <div>
-              <span>最近通知</span>
-              <strong>{{ summary.unreadNotifications }} 条未读</strong>
-            </div>
-            <button type="button" @click="openNotifications">查看全部</button>
-          </header>
-
-          <button
-            v-for="item in recentNotifications"
-            :key="item.id"
-            type="button"
-            class="message-center__notice-mini"
-            :class="{ 'is-unread': !item.read }"
-            @click="handleNotificationClick(item)"
-          >
-            <span>{{ notificationTitle(item) }}</span>
-            <small>{{ item.content }}</small>
-            <time>
-              <el-icon><Clock /></el-icon>
-              {{ formatTime(item.createdAt) }}
-            </time>
-          </button>
-
-          <div v-if="recentNotifications.length === 0" class="message-center__empty-small">
-            最近没有新通知。
-          </div>
-        </aside>
       </section>
     </main>
   </div>
@@ -548,9 +501,7 @@ onMounted(async () => {
 .message-center {
   min-height: calc(100vh - 74px);
   padding: 14px 18px 20px 246px;
-  background:
-    radial-gradient(circle at 20% 0%, rgba(255, 115, 82, 0.08), transparent 34%),
-    #f6f7f9;
+  background: #f6f7f9;
   color: #20242f;
 }
 
@@ -559,76 +510,62 @@ onMounted(async () => {
   font: inherit;
 }
 
-.message-center__main {
-  width: 100%;
-  max-width: none;
-  margin: 0 auto;
-}
-
 .message-center__shell {
   display: grid;
-  grid-template-columns: minmax(300px, 352px) minmax(460px, 1.18fr) minmax(300px, 0.82fr);
+  grid-template-columns: 340px minmax(0, 1fr);
   gap: 12px;
   min-height: calc(100vh - 108px);
 }
 
-.message-center__rail,
-.message-center__chat,
-.message-center__notification-board,
-.message-center__notice-rail {
+.message-center__side,
+.message-center__panel {
   min-width: 0;
   overflow: hidden;
   border: 1px solid rgba(26, 31, 44, 0.08);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 18px 42px rgba(32, 36, 47, 0.07);
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(32, 36, 47, 0.06);
 }
 
-.message-center__rail {
+.message-center__side {
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 12px;
   padding: 14px;
 }
 
-.message-center__rail-head,
+.message-center__side-head,
 .message-center__chat-head,
-.message-center__notification-board header,
-.message-center__notice-rail header,
+.message-center__interactions-head,
 .message-center__composer {
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
-.message-center__rail-head,
-.message-center__notification-board header,
-.message-center__notice-rail header {
+.message-center__side-head,
+.message-center__interactions-head {
   justify-content: space-between;
 }
 
-.message-center__rail-head span,
-.message-center__notification-board header span,
-.message-center__notice-rail header span {
+.message-center__side-head span,
+.message-center__interactions-head span {
   display: block;
-  color: #ff5a45;
+  color: #8a91a0;
   font-size: 12px;
-  font-weight: 800;
 }
 
-.message-center__rail-head strong,
+.message-center__side-head strong,
 .message-center__chat-head strong,
-.message-center__notification-board header strong,
-.message-center__notice-rail header strong {
+.message-center__interactions-head strong {
   color: #1f2531;
   font-size: 20px;
-  font-weight: 860;
+  font-weight: 840;
 }
 
-.message-center__rail-head button,
+.message-center__side-head button,
 .message-center__chat-head button,
-.message-center__notification-board header button,
-.message-center__notice-rail header button,
+.message-center__interactions-head button,
 .message-center__composer button {
   border: none;
   border-radius: 10px;
@@ -637,14 +574,14 @@ onMounted(async () => {
   cursor: pointer;
 }
 
-.message-center__rail-head button {
+.message-center__side-head button {
   display: grid;
   place-items: center;
   width: 36px;
   height: 36px;
 }
 
-.message-center__switch {
+.message-center__tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
@@ -653,7 +590,7 @@ onMounted(async () => {
   background: #f2f4f7;
 }
 
-.message-center__switch button {
+.message-center__tabs button {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -668,13 +605,13 @@ onMounted(async () => {
   font-weight: 760;
 }
 
-.message-center__switch button.is-active {
+.message-center__tabs button.is-active {
   background: #fff;
   color: #ff4f3b;
   box-shadow: 0 8px 18px rgba(32, 36, 47, 0.08);
 }
 
-.message-center__switch em,
+.message-center__tabs em,
 .message-center__conversation em {
   min-width: 18px;
   height: 18px;
@@ -733,7 +670,7 @@ onMounted(async () => {
 
 .message-center__list,
 .message-center__thread,
-.message-center__notice-rail {
+.message-center__interaction-list {
   overflow-y: auto;
 }
 
@@ -741,18 +678,12 @@ onMounted(async () => {
   display: grid;
   align-content: start;
   gap: 8px;
-  padding-right: 2px;
 }
 
-.message-center__conversation {
+.message-center__conversation,
+.message-center__interaction-row {
   position: relative;
-  display: grid;
-  grid-template-columns: 46px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
   width: 100%;
-  min-height: 72px;
-  padding: 10px;
   border: none;
   border-radius: 12px;
   background: transparent;
@@ -761,8 +692,18 @@ onMounted(async () => {
   text-align: left;
 }
 
+.message-center__conversation {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 72px;
+  padding: 10px;
+}
+
 .message-center__conversation:hover,
-.message-center__conversation.is-active {
+.message-center__conversation.is-active,
+.message-center__interaction-row:hover {
   background: #fff1ed;
 }
 
@@ -782,22 +723,24 @@ onMounted(async () => {
 
 .message-center__conversation strong,
 .message-center__conversation small,
-.message-center__notice-mini span,
-.message-center__notice-mini small {
+.message-center__interaction-row span,
+.message-center__interaction-row small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.message-center__conversation strong {
+.message-center__conversation strong,
+.message-center__interaction-row span {
   font-size: 14px;
+  font-weight: 820;
 }
 
 .message-center__conversation small,
 .message-center__chat-head span,
 .message-center__bubble small,
-.message-center__notice-mini small,
-.message-center__notice-card small,
+.message-center__interaction-row small,
+.message-center__interaction-card small,
 .message-center__empty-small {
   color: #8a91a0;
   font-size: 12px;
@@ -815,18 +758,37 @@ onMounted(async () => {
   bottom: 10px;
 }
 
-.message-center__chat {
+.message-center__interaction-row {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid transparent;
+}
+
+.message-center__interaction-row.is-unread {
+  border-color: #ffd2c8;
+  background: #fff8f6;
+}
+
+.message-center__interaction-row time {
+  color: #a0a7b4;
+  font-size: 12px;
+}
+
+.message-center__panel {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
-.message-center__chat-head {
+.message-center__chat-head,
+.message-center__interactions-head {
   min-height: 72px;
   padding: 14px 18px;
   border-bottom: 1px solid #edf0f4;
 }
 
-.message-center__chat-head div {
+.message-center__chat-head div,
+.message-center__interactions-head div {
   min-width: 0;
   display: grid;
   gap: 3px;
@@ -834,8 +796,7 @@ onMounted(async () => {
 }
 
 .message-center__chat-head button,
-.message-center__notification-board header button,
-.message-center__notice-rail header button {
+.message-center__interactions-head button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -848,9 +809,7 @@ onMounted(async () => {
   flex-direction: column;
   gap: 12px;
   padding: 18px;
-  background:
-    linear-gradient(180deg, rgba(255, 241, 237, 0.42), transparent 180px),
-    #fbfcfe;
+  background: #fbfcfe;
 }
 
 .message-center__bubble {
@@ -907,85 +866,35 @@ onMounted(async () => {
   opacity: 0.55;
 }
 
-.message-center__notice-rail {
+.message-center__interactions {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.message-center__interaction-list {
   display: grid;
   align-content: start;
   gap: 10px;
   padding: 14px;
+  background: #fbfcfe;
 }
 
-.message-center__notice-mini {
-  display: grid;
-  gap: 6px;
-  width: 100%;
-  padding: 12px;
-  border: 1px solid #edf0f4;
-  border-radius: 12px;
-  background: #fff;
-  color: #20242f;
-  cursor: pointer;
-  text-align: left;
-}
-
-.message-center__notice-mini.is-unread {
-  border-color: #ffd2c8;
-  background: #fff7f4;
-}
-
-.message-center__notice-mini span {
-  font-size: 14px;
-  font-weight: 820;
-}
-
-.message-center__notice-mini time {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: #a0a7b4;
-  font-size: 12px;
-}
-
-.message-center__notification-board {
-  grid-column: 2 / 4;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 14px;
-  padding: 16px;
-}
-
-.message-center__notice-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  align-content: start;
-  gap: 12px;
-  overflow-y: auto;
-  padding-right: 2px;
-}
-
-.message-center__notice-card {
+.message-center__interaction-card {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);
   gap: 12px;
-  min-height: 132px;
   padding: 14px;
   border: 1px solid #edf0f4;
   border-radius: 14px;
   background: #fff;
   cursor: pointer;
-  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
 }
 
-.message-center__notice-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 14px 28px rgba(32, 36, 47, 0.08);
-}
-
-.message-center__notice-card.is-unread {
+.message-center__interaction-card.is-unread {
   border-color: #ffb2a7;
-  background: linear-gradient(135deg, #fff8f6, #fff);
+  background: #fff8f6;
 }
 
-.message-center__notice-icon {
+.message-center__interaction-icon {
   display: grid;
   place-items: center;
   width: 42px;
@@ -996,21 +905,21 @@ onMounted(async () => {
   font-size: 20px;
 }
 
-.message-center__notice-card strong {
-  display: block;
+.message-center__interaction-card strong {
   color: #20242f;
   font-size: 16px;
 }
 
-.message-center__notice-card p {
-  display: -webkit-box;
-  min-height: 3.2em;
-  margin: 8px 0 10px;
-  overflow: hidden;
+.message-center__interaction-card p {
+  margin: 7px 0 9px;
   color: #566071;
   line-height: 1.6;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+}
+
+.message-center__interaction-card small {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .message-center__load-more {
@@ -1021,12 +930,6 @@ onMounted(async () => {
   background: #fff;
   color: #667085;
   cursor: pointer;
-}
-
-.message-center__load-more.is-wide {
-  align-self: end;
-  max-width: 360px;
-  justify-self: center;
 }
 
 .message-center__empty-state {
@@ -1054,24 +957,6 @@ onMounted(async () => {
   text-align: center;
 }
 
-@media (max-width: 1320px) {
-  .message-center {
-    padding-right: 12px;
-  }
-
-  .message-center__shell {
-    grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
-  }
-
-  .message-center__notice-rail {
-    display: none;
-  }
-
-  .message-center__notification-board {
-    grid-column: 2;
-  }
-}
-
 @media (max-width: 980px) {
   .message-center {
     padding: 12px 10px 88px;
@@ -1081,11 +966,7 @@ onMounted(async () => {
     grid-template-columns: 1fr;
   }
 
-  .message-center__notification-board {
-    grid-column: auto;
-  }
-
-  .message-center__chat {
+  .message-center__panel {
     min-height: 68vh;
   }
 }

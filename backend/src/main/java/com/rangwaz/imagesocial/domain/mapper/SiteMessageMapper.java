@@ -32,24 +32,19 @@ public interface SiteMessageMapper extends BaseMapper<SiteMessage> {
 
     @Select("""
             <script>
-            SELECT COUNT(*)
-            FROM (
-              SELECT
-                CASE WHEN m.sender_id = #{userId} THEN m.recipient_id ELSE m.sender_id END AS peer_id
-              FROM site_messages m
-              INNER JOIN users u
-                ON u.id = CASE WHEN m.sender_id = #{userId} THEN m.recipient_id ELSE m.sender_id END
-              WHERE m.message_kind = 'DIRECT'
-                AND (m.sender_id = #{userId} OR m.recipient_id = #{userId})
-                <if test='keyword != null and keyword != ""'>
-                  AND (
-                    u.nickname LIKE CONCAT('%', #{keyword}, '%')
-                    OR u.username LIKE CONCAT('%', #{keyword}, '%')
-                    OR m.content LIKE CONCAT('%', #{keyword}, '%')
-                  )
-                </if>
-              GROUP BY peer_id
-            ) conv_count
+            SELECT COUNT(DISTINCT CASE WHEN m.sender_id = #{userId} THEN m.recipient_id ELSE m.sender_id END)
+            FROM site_messages m
+            INNER JOIN users u
+              ON u.id = CASE WHEN m.sender_id = #{userId} THEN m.recipient_id ELSE m.sender_id END
+            WHERE m.message_kind = 'DIRECT'
+              AND (m.sender_id = #{userId} OR m.recipient_id = #{userId})
+              <if test='keyword != null and keyword != ""'>
+                AND (
+                  u.nickname LIKE CONCAT('%', #{keyword}, '%')
+                  OR u.username LIKE CONCAT('%', #{keyword}, '%')
+                  OR m.content LIKE CONCAT('%', #{keyword}, '%')
+                )
+              </if>
             </script>
             """)
     long countConversations(@Param("userId") Long userId, @Param("keyword") String keyword);
