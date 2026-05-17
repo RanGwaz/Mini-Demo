@@ -197,33 +197,6 @@ public class FeedServiceImpl implements FeedService {
         return new FeedHomeSnapshotResponse(computation.pageResponse(), computation.diagnostics());
     }
 
-    public PageResponse<PostView> socialFeed(Long currentUserId,
-                                             String mode,
-                                             int page,
-                                             int size) {
-        int safePage = Math.max(1, page);
-        int safeSize = Math.min(100, Math.max(1, size));
-        if (currentUserId == null) {
-            return new PageResponse<>(List.of(), 0, safePage, safeSize);
-        }
-
-        int offset = (safePage - 1) * safeSize;
-        boolean friendsMode = "friends".equalsIgnoreCase(mode);
-        long total = friendsMode
-                ? postMapper.countFriendFeedPosts(currentUserId)
-                : postMapper.countFollowingFeedPosts(currentUserId);
-        List<Post> records = friendsMode
-                ? postMapper.selectFriendFeedPosts(currentUserId, offset, safeSize)
-                : postMapper.selectFollowingFeedPosts(currentUserId, offset, safeSize);
-        String reason = friendsMode ? "Friends update" : "From creators you follow";
-        return new PageResponse<>(
-                postService.toViews(records, post -> reason),
-                total,
-                safePage,
-                safeSize
-        );
-    }
-
     private HomeFeedComputation computeHomeFeed(Long currentUserId,
                                                 int page,
                                                 int size,

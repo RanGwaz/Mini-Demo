@@ -1,7 +1,6 @@
 package com.rangwaz.imagesocial.topic;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.rangwaz.imagesocial.domain.entity.Channel;
 import com.rangwaz.imagesocial.domain.entity.Topic;
 import com.rangwaz.imagesocial.domain.mapper.TopicMapper;
 import com.rangwaz.imagesocial.topic.dto.TopicView;
@@ -38,13 +37,6 @@ public class TopicService {
         return topicMapper.selectTrendingTopics(normalizeLimit(limit));
     }
 
-    public List<Topic> listChannelTopics(String channelCode, int limit) {
-        if (channelCode == null || channelCode.isBlank()) {
-            return List.of();
-        }
-        return topicMapper.selectByChannel(channelCode.trim(), normalizeLimit(limit));
-    }
-
     public List<Topic> listRelatedTopics(String slug, int limit) {
         if (slug == null || slug.isBlank()) {
             return List.of();
@@ -73,7 +65,6 @@ public class TopicService {
     public List<Topic> resolvePublishTopics(Collection<Long> topicIds,
                                             Collection<String> topicNames,
                                             Collection<String> legacyTags,
-                                            Channel channel,
                                             Long createdBy) {
         Map<Long, Topic> resolved = new LinkedHashMap<>();
         if (topicIds != null && !topicIds.isEmpty()) {
@@ -88,8 +79,8 @@ public class TopicService {
             }
         }
 
-        addResolvedNames(resolved, topicNames, channel, createdBy);
-        addResolvedNames(resolved, legacyTags, channel, createdBy);
+        addResolvedNames(resolved, topicNames, createdBy);
+        addResolvedNames(resolved, legacyTags, createdBy);
         return resolved.values().stream().limit(MAX_PUBLISH_TOPICS).toList();
     }
 
@@ -162,7 +153,6 @@ public class TopicService {
 
     private void addResolvedNames(Map<Long, Topic> resolved,
                                   Collection<String> rawNames,
-                                  Channel channel,
                                   Long createdBy) {
         if (rawNames == null || rawNames.isEmpty()) {
             return;
@@ -172,7 +162,7 @@ public class TopicService {
                 return;
             }
             String name = normalizeTopicName(rawName);
-            if (name == null || isChannelName(name, channel)) {
+            if (name == null) {
                 continue;
             }
             Topic topic = findOrCreateUserTopic(name, createdBy);
@@ -180,14 +170,6 @@ public class TopicService {
                 resolved.putIfAbsent(topic.getId(), topic);
             }
         }
-    }
-
-    private boolean isChannelName(String name, Channel channel) {
-        if (channel == null || name == null) {
-            return false;
-        }
-        return name.equalsIgnoreCase(Objects.toString(channel.getCode(), ""))
-                || name.equalsIgnoreCase(Objects.toString(channel.getName(), ""));
     }
 
     private String normalizeTopicName(String rawName) {

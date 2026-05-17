@@ -1,8 +1,6 @@
 package com.rangwaz.imagesocial.search;
 
 import com.rangwaz.imagesocial.auth.dto.UserSummary;
-import com.rangwaz.imagesocial.channel.ChannelService;
-import com.rangwaz.imagesocial.channel.dto.ChannelView;
 import com.rangwaz.imagesocial.common.api.PageResponse;
 import com.rangwaz.imagesocial.post.PostService;
 import com.rangwaz.imagesocial.post.dto.PostView;
@@ -18,16 +16,13 @@ public class SearchService {
     private final UserService userService;
     private final PostService postService;
     private final TopicService topicService;
-    private final ChannelService channelService;
 
     public SearchService(UserService userService,
                          PostService postService,
-                         TopicService topicService,
-                         ChannelService channelService) {
+                         TopicService topicService) {
         this.userService = userService;
         this.postService = postService;
         this.topicService = topicService;
-        this.channelService = channelService;
     }
 
     public SearchResult search(String keyword) {
@@ -36,9 +31,6 @@ public class SearchService {
                 postService.search(keyword, 20),
                 topicService.searchActiveTopics(keyword, 12).stream()
                         .map(topicService::toView)
-                        .toList(),
-                channelService.searchActiveChannels(keyword, 8).stream()
-                        .map(channelService::toView)
                         .toList());
     }
 
@@ -56,12 +48,6 @@ public class SearchService {
                 .toList();
     }
 
-    public List<ChannelView> searchChannels(String keyword) {
-        return channelService.searchActiveChannels(keyword, 20).stream()
-                .map(channelService::toView)
-                .toList();
-    }
-
     public PageResponse<PostView> searchPostsPage(String keyword, int page, int size) {
         return postService.searchPostsPage(keyword, page, size);
     }
@@ -73,8 +59,7 @@ public class SearchService {
     public record SearchResult(
             List<UserSummary> users,
             List<PostView> posts,
-            List<TopicView> topics,
-            List<ChannelView> channels
+            List<TopicView> topics
     ) {
     }
 }

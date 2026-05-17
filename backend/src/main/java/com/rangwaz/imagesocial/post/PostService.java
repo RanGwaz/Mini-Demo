@@ -5,10 +5,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rangwaz.imagesocial.auth.dto.UserSummary;
-import com.rangwaz.imagesocial.channel.ChannelService;
 import com.rangwaz.imagesocial.common.api.PageResponse;
 import com.rangwaz.imagesocial.common.exception.BusinessException;
-import com.rangwaz.imagesocial.domain.entity.Channel;
 import com.rangwaz.imagesocial.domain.entity.ContentReport;
 import com.rangwaz.imagesocial.domain.entity.Post;
 import com.rangwaz.imagesocial.domain.entity.PostAsset;
@@ -53,6 +51,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class PostService {
     private static final TypeReference<Map<String, Object>> EXTRA_TYPE = new TypeReference<>() {};
     private static final long VIEW_DEDUP_WINDOW_MILLIS = 30_000L;
+    private static final String DEFAULT_POST_SCOPE = "general";
+    private static final String DEFAULT_POST_TYPE = "general_post";
     private static final ConcurrentHashMap<String, Long> VIEW_TRACKER = new ConcurrentHashMap<>();
 
     private final PostMapper postMapper;
@@ -65,7 +65,6 @@ public class PostService {
     private final UserService userService;
     private final EventService eventService;
     private final SearchIndexGateway searchIndexGateway;
-    private final ChannelService channelService;
     private final TopicService topicService;
     private final PostTopicService postTopicService;
     private final ObjectMapper objectMapper;
@@ -80,7 +79,6 @@ public class PostService {
                        UserService userService,
                        EventService eventService,
                        SearchIndexGateway searchIndexGateway,
-                       ChannelService channelService,
                        TopicService topicService,
                        PostTopicService postTopicService,
                        ObjectMapper objectMapper) {
@@ -94,7 +92,6 @@ public class PostService {
         this.userService = userService;
         this.eventService = eventService;
         this.searchIndexGateway = searchIndexGateway;
-        this.channelService = channelService;
         this.topicService = topicService;
         this.postTopicService = postTopicService;
         this.objectMapper = objectMapper;
@@ -103,15 +100,14 @@ public class PostService {
     @Transactional
     public PostView createPost(Long authorId, CreatePostRequest request) {
         User author = userService.requireById(authorId);
-        Channel channel = resolveDatabaseChannel(request);
-        String postType = resolveDatabasePostType(channel, request.postType());
+        String postScope = DEFAULT_POST_SCOPE;
+        String postType = firstNonBlank(request.postType(), DEFAULT_POST_TYPE);
         String title = normalizeTitle(request.title());
         String content = request.content() == null ? "" : request.content().trim();
         List<Topic> publishTopics = topicService.resolvePublishTopics(
                 request.topicIds(),
                 request.topics(),
                 request.tags(),
-                channel,
                 authorId
         );
         List<String> normalizedTags = publishTopics.stream()
@@ -124,18 +120,18 @@ public class PostService {
 
         Post post = new Post();
         post.setAuthorId(authorId);
-        post.setChannelCode(channel.getCode());
+        post.setChannelCode(postScope);
         post.setPostType(postType);
         post.setTitle(title);
         post.setContent(content);
         post.setExtra(toExtraJson(request.extra()));
         post.setTags(joinTags(normalizedTags));
-        post.setTopicPath(buildTopicPath(channel, publishTopics));
-        post.setSemanticTags(joinRawTerms(buildSemanticTerms(channel, publishTopics, normalizedTags)));
+        post.setTopicPath(buildTopicPath(publishTopics));
+        post.setSemanticTags(joinRawTerms(buildSemanticTerms(publishTopics, normalizedTags)));
         post.setStyleTags(assets.isEmpty() ? "text" : "image");
-        post.setTopicClusterKey(channel.getCode());
-        post.setSubtopicClusterKey(publishTopics.isEmpty() ? channel.getCode() : publishTopics.get(0).getSlug());
-        post.setTaxonomyVersion("db-channel-topic-v1");
+        post.setTopicClusterKey(postScope);
+        post.setSubtopicClusterKey(publishTopics.isEmpty() ? postScope : publishTopics.get(0).getSlug());
+        post.setTaxonomyVersion("topic-v1");
         post.setCoverUrl(firstAsset == null ? "" : firstAsset.fileUrl());
         post.setThumbUrl(firstAsset == null ? null : firstAsset.thumbUrl());
         post.setVisibility("PUBLIC");
@@ -176,7 +172,7 @@ public class PostService {
                 authorId,
                 "POST",
                 post.getId(),
-                Map.of("title", post.getTitle(), "channelCode", channel.getCode(), "postType", postType, "tags", normalizedTags)
+                Map.of("title", post.getTitle(), "postType", postType, "tags", normalizedTags)
         );
         searchIndexGateway.syncPost(view);
         return view;
@@ -228,27 +224,21 @@ public class PostService {
     }
 
     public PageResponse<PostView> listByTopic(Long topicId, int page, int size) {
-        return listPublicPostsByScope(null, topicId, null, "hot", page, size);
+        return listPublicPostsByScope(topicId, null, "hot", page, size);
     }
 
     public PageResponse<PostView> listByTopic(Long topicId, String sort, int page, int size) {
-        return listPublicPostsByScope(null, topicId, null, sort, page, size);
+        return listPublicPostsByScope(topicId, null, sort, page, size);
     }
 
-    public PageResponse<PostView> listByChannel(String channelCode, String sort, int page, int size) {
-        return listPublicPostsByScope(channelCode, null, null, sort, page, size);
-    }
-
-    public PageResponse<PostView> listPublicPostsByScope(String channelCode,
-                                                         Long topicId,
+    public PageResponse<PostView> listPublicPostsByScope(Long topicId,
                                                          String topicSlug,
                                                          int page,
                                                          int size) {
-        return listPublicPostsByScope(channelCode, topicId, topicSlug, "hot", page, size);
+        return listPublicPostsByScope(topicId, topicSlug, "hot", page, size);
     }
 
-    public PageResponse<PostView> listPublicPostsByScope(String channelCode,
-                                                         Long topicId,
+    public PageResponse<PostView> listPublicPostsByScope(Long topicId,
                                                          String topicSlug,
                                                          String sort,
                                                          int page,
@@ -256,13 +246,12 @@ public class PostService {
         int safePage = Math.max(1, page);
         int safeSize = Math.min(100, Math.max(1, size));
         int offset = (safePage - 1) * safeSize;
-        String safeChannelCode = channelCode == null || channelCode.isBlank() ? null : channelCode.trim();
         String safeTopicSlug = topicSlug == null || topicSlug.isBlank() ? null : topicSlug.trim();
         String safeSort = "latest".equalsIgnoreCase(sort) ? "latest" : "hot";
-        long total = postMapper.countPublicPostsByScope(safeChannelCode, topicId, safeTopicSlug);
-        List<Post> posts = postMapper.selectPublicPostsByScope(safeChannelCode, topicId, safeTopicSlug, safeSort, offset, safeSize);
+        long total = postMapper.countPublicPostsByScope(topicId, safeTopicSlug);
+        List<Post> posts = postMapper.selectPublicPostsByScope(topicId, safeTopicSlug, safeSort, offset, safeSize);
         return new PageResponse<>(
-                toViews(posts, post -> "频道/话题内容"),
+                toViews(posts, post -> "Topic content"),
                 total,
                 safePage,
                 safeSize
@@ -384,7 +373,7 @@ public class PostService {
         if (author == null) {
             throw new BusinessException("帖子作者不存在");
         }
-        String channelCode = firstNonBlank(post.getChannelCode(), post.getTopicClusterKey(), "campus");
+        String channelCode = firstNonBlank(post.getChannelCode(), post.getTopicClusterKey(), DEFAULT_POST_SCOPE);
         String postType = firstNonBlank(post.getPostType(), "general_post");
         return new PostView(
                 post.getId(),
@@ -412,27 +401,6 @@ public class PostService {
                 reason,
                 post.getCreatedAt()
         );
-    }
-
-    private Channel resolveDatabaseChannel(CreatePostRequest request) {
-        String channelKey = firstNonBlank(request.channelCode(), request.channel());
-        if (channelKey == null || channelKey.isBlank()) {
-            channelKey = "campus";
-        }
-        Channel channel = channelService.findByCode(channelKey);
-        if (channel == null
-                || !"ACTIVE".equalsIgnoreCase(channel.getStatus())
-                || !Boolean.TRUE.equals(channel.getEnabled())
-                || !Boolean.TRUE.equals(channel.getPublishEnabled())) {
-            throw new BusinessException("频道不存在或不可发布");
-        }
-        return channel;
-    }
-
-    private String resolveDatabasePostType(Channel channel, String rawPostType) {
-        String defaultPostType = firstNonBlank(channel.getDefaultPostType(), "general_post");
-        String value = firstNonBlank(rawPostType, defaultPostType);
-        return value == null || value.isBlank() ? defaultPostType : value;
     }
 
     private List<PostAssetRequest> normalizeAssets(CreatePostRequest request) {
@@ -541,10 +509,9 @@ public class PostService {
         return String.join(",", normalizedTags);
     }
 
-    private String buildTopicPath(Channel channel, List<Topic> topics) {
-        String channelName = firstNonBlank(channel.getName(), channel.getCode());
+    private String buildTopicPath(List<Topic> topics) {
         if (topics == null || topics.isEmpty()) {
-            return channelName;
+            return "内容";
         }
         String topicPath = topics.stream()
                 .map(Topic::getName)
@@ -553,15 +520,15 @@ public class PostService {
                 .filter(value -> !value.isBlank())
                 .limit(4)
                 .collect(Collectors.joining("/"));
-        return topicPath.isBlank() ? channelName : channelName + "/" + topicPath;
+        return topicPath.isBlank() ? "内容" : topicPath;
     }
 
-    private List<String> buildSemanticTerms(Channel channel, List<Topic> topics, List<String> tags) {
+    private List<String> buildSemanticTerms(List<Topic> topics, List<String> tags) {
         java.util.stream.Stream<String> topicTerms = topics == null
                 ? java.util.stream.Stream.empty()
                 : topics.stream().flatMap(topic -> java.util.stream.Stream.of(topic.getName(), topic.getSlug()));
         return java.util.stream.Stream.concat(
-                        java.util.stream.Stream.of(channel.getCode(), channel.getName(), buildTopicPath(channel, topics)),
+                        java.util.stream.Stream.of(DEFAULT_POST_SCOPE, buildTopicPath(topics)),
                         java.util.stream.Stream.concat(topicTerms, tags.stream())
                 )
                 .filter(Objects::nonNull)

@@ -4,7 +4,6 @@ import com.rangwaz.imagesocial.common.api.ApiResponse;
 import com.rangwaz.imagesocial.common.api.PageResponse;
 import com.rangwaz.imagesocial.post.dto.PostView;
 import com.rangwaz.imagesocial.auth.dto.UserSummary;
-import com.rangwaz.imagesocial.channel.dto.ChannelView;
 import com.rangwaz.imagesocial.topic.dto.TopicView;
 import jakarta.validation.constraints.NotBlank;
 import java.util.List;
@@ -43,11 +42,6 @@ public class SearchController {
     @GetMapping("/topics")
     public ApiResponse<List<TopicView>> searchTopics(@RequestParam @NotBlank String keyword) {
         return ApiResponse.success(searchService.searchTopics(keyword));
-    }
-
-    @GetMapping("/channels")
-    public ApiResponse<List<ChannelView>> searchChannels(@RequestParam @NotBlank String keyword) {
-        return ApiResponse.success(searchService.searchChannels(keyword));
     }
 
     @GetMapping("/posts/page")

@@ -6,7 +6,6 @@ const LoginView = () => import('../views/LoginView.vue')
 const PostDetailView = () => import('../views/PostDetailView.vue')
 const ProfileView = () => import('../views/ProfileView.vue')
 const PublishView = () => import('../views/PublishView.vue')
-const ChannelView = () => import('../views/ChannelView.vue')
 const SearchDiscoverView = () => import('../views/SearchDiscoverView.vue')
 const MessagesView = () => import('../views/MessagesView.vue')
 
@@ -38,11 +37,6 @@ const router = createRouter({
       name: 'publish',
       component: PublishView,
       meta: { requiresAuth: true },
-    },
-    {
-      path: '/channels/:code',
-      name: 'channel',
-      component: ChannelView,
     },
     {
       path: '/search',

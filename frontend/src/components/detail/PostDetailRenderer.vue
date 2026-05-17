@@ -2,7 +2,7 @@
 defineOptions({ name: 'PostDetailRenderer' })
 
 import { computed } from 'vue'
-import { channelConfig, defaultChannelConfig, resolveChannelCode } from '../../config/channelConfig'
+import DefaultPostDetail from './layouts/DefaultPostDetail.vue'
 import type { PostView } from '../../types'
 
 const props = defineProps<{
@@ -10,8 +10,7 @@ const props = defineProps<{
 }>()
 
 const DetailComponent = computed(() => {
-  const code = resolveChannelCode(props.post.channelCode || props.post.channel)
-  return code ? channelConfig[code].detailComponent : defaultChannelConfig.detailComponent
+  return DefaultPostDetail
 })
 </script>
 

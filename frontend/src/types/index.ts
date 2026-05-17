@@ -113,15 +113,6 @@ export interface SearchResult {
     followerCount?: number
     hotScore?: number
   }[]
-  channels: {
-    code: string
-    name: string
-    description?: string
-    icon?: string
-    sortOrder?: number
-    postType?: string
-    waterfall?: boolean
-  }[]
 }
 
 export interface CommentView {

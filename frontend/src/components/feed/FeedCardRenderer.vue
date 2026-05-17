@@ -2,7 +2,7 @@
 defineOptions({ name: 'FeedCardRenderer' })
 
 import { computed } from 'vue'
-import { channelConfig, defaultChannelConfig, resolveChannelCode } from '../../config/channelConfig'
+import DefaultFeedCard from './cards/DefaultFeedCard.vue'
 import type { PostView } from '../../types'
 
 const props = defineProps<{
@@ -18,8 +18,7 @@ const emit = defineEmits<{
 }>()
 
 const CardComponent = computed(() => {
-  const code = resolveChannelCode(props.post.channelCode || props.post.channel)
-  return code ? channelConfig[code].cardComponent : defaultChannelConfig.cardComponent
+  return DefaultFeedCard
 })
 </script>
 

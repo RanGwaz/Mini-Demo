@@ -13,9 +13,7 @@ import {
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { channelConfig, defaultChannelConfig, resolveChannelCode } from '../config/channelConfig'
-import { defaultPublishChannelKey, publishChannels } from '../domain/contentTaxonomy'
-import { api, type ChannelView, type CreatePostAssetPayload, type TopicView } from '../services/api'
+import { api, type CreatePostAssetPayload, type TopicView } from '../services/api'
 import { useAuthStore } from '../stores/auth'
 import type { UploadResponse } from '../types'
 
@@ -27,6 +25,8 @@ const MAX_TOPICS_PER_POST = 7
 const RECOMMEND_TOPIC_LIMIT = 6
 const DRAFT_STORAGE_KEY = 'vibelo-publish-drafts'
 const DRAFT_AUTOSAVE_DELAY_MS = 700
+const DEFAULT_POST_TYPE = 'general_post'
+const PUBLISH_SCOPE_LABEL = '公开内容'
 
 type CoverPreviewCard = {
   key: string
@@ -41,15 +41,6 @@ type CoverPreviewCard = {
   topic: string
 }
 
-type PublishChannelOption = {
-  key: string
-  label: string
-  desc: string
-  signal: string
-  postType: string
-  waterfall: boolean
-}
-
 type SelectedTopic = {
   id?: number
   name: string
@@ -62,7 +53,6 @@ type PublishDraft = {
   id: string
   title: string
   content: string
-  channel: string
   topics: SelectedTopic[]
   assets: UploadResponse[]
   updatedAt: number
@@ -84,8 +74,6 @@ const selectedTopics = ref<SelectedTopic[]>([])
 const topicInput = ref('')
 const quickTopics = ref<TopicView[]>([])
 const topicRecommendations = ref<TopicView[]>([])
-const publishChannelOptions = ref<PublishChannelOption[]>(publishChannels.map(mapStaticPublishChannel))
-const activeChannel = ref<string>(defaultPublishChannelKey)
 const drafts = ref<PublishDraft[]>([])
 const activeDraftId = ref('')
 const draftHydrated = ref(false)
@@ -139,12 +127,8 @@ const sampleCoverCards: CoverPreviewCard[] = [
 
 const titleCount = computed(() => form.title.length)
 const contentCount = computed(() => form.content.length)
-const currentChannel = computed(() => (
-  publishChannelOptions.value.find((item) => item.key === activeChannel.value)
-  || publishChannelOptions.value[0]
-))
-const currentChannelLabel = computed(() => currentChannel.value?.label || '')
-const currentPostType = computed(() => currentChannel.value?.postType || defaultChannelConfig.postType)
+const currentPostType = computed(() => DEFAULT_POST_TYPE)
+const currentPublishScopeLabel = computed(() => PUBLISH_SCOPE_LABEL)
 const currentUserName = computed(() => authStore.currentUser?.nickname || 'Vibelo 用户')
 const currentUserAvatar = computed(() => authStore.currentUser?.avatarUrl || 'https://api.dicebear.com/9.x/adventurer/svg?seed=creator')
 const hasImages = computed(() => uploadedAssets.value.length > 0)
@@ -198,10 +182,6 @@ onUnmounted(() => {
   if (draftAutoSaveTimer) window.clearTimeout(draftAutoSaveTimer)
 })
 
-watch(activeChannel, () => {
-  void loadTopicSuggestions()
-})
-
 watch(normalizedTopicKeyword, (keyword) => {
   if (!showTopicSearchPanel.value) return
   if (topicSearchTimer) window.clearTimeout(topicSearchTimer)
@@ -218,7 +198,6 @@ watch(
   [
     () => form.title,
     () => form.content,
-    activeChannel,
     () => selectedTopics.value.map(topicKey).join('|'),
     () => uploadedAssets.value.map((asset) => asset.objectKey || asset.fileUrl).join('|'),
   ],
@@ -230,7 +209,6 @@ function resolveAssetCover(asset: UploadResponse) {
 }
 
 async function initializePublish() {
-  await loadPublishChannels()
   applyRoutePublishHints()
   await loadTopicSuggestions()
 }
@@ -241,40 +219,8 @@ function routeQueryValue(value: unknown) {
 }
 
 function applyRoutePublishHints() {
-  const channelHint = routeQueryValue(route.query.channel)
-  if (channelHint && publishChannelOptions.value.some((item) => item.key === channelHint)) {
-    activeChannel.value = channelHint
-  }
   const topicHint = routeQueryValue(route.query.topic)
   if (topicHint) addTopic(topicHint)
-}
-
-function resolvePublishPostType(code: string, fallback?: string) {
-  const resolvedCode = resolveChannelCode(code)
-  if (resolvedCode) return channelConfig[resolvedCode].postType
-  return fallback || defaultChannelConfig.postType
-}
-
-function mapStaticPublishChannel(channel: (typeof publishChannels)[number]): PublishChannelOption {
-  return {
-    key: channel.key,
-    label: channel.label,
-    desc: channel.desc,
-    signal: channel.signal,
-    postType: resolvePublishPostType(channel.key, channel.postType),
-    waterfall: channel.waterfall,
-  }
-}
-
-function mapApiPublishChannel(channel: ChannelView): PublishChannelOption {
-  return {
-    key: channel.code,
-    label: channel.name,
-    desc: channel.description || '正在生长的内容频道',
-    signal: channel.waterfall ? '瀑布流展示' : '专题流展示',
-    postType: resolvePublishPostType(channel.code, channel.postType),
-    waterfall: channel.waterfall,
-  }
 }
 
 function normalizeTopic(raw: string) {
@@ -317,23 +263,6 @@ function formatTopicHeat(topic: TopicView) {
   return '新话题'
 }
 
-async function loadPublishChannels() {
-  try {
-    const channels = await api.channels()
-    const next = channels
-      .filter((item) => item.code && item.name)
-      .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
-      .map(mapApiPublishChannel)
-    if (next.length === 0) return
-    publishChannelOptions.value = next
-    if (!next.some((item) => item.key === activeChannel.value)) {
-      activeChannel.value = next.find((item) => item.key === defaultPublishChannelKey)?.key || next[0].key
-    }
-  } catch {
-    publishChannelOptions.value = publishChannels.map(mapStaticPublishChannel)
-  }
-}
-
 async function loadTopicSuggestions(keyword = '') {
   topicLoading.value = true
   try {
@@ -373,11 +302,6 @@ function addTopicFromInput() {
 
 function removeTopic(topic: SelectedTopic) {
   selectedTopics.value = selectedTopics.value.filter((item) => topicKey(item) !== topicKey(topic))
-}
-
-function selectPublishChannel(channelKey: string) {
-  if (activeChannel.value === channelKey) return
-  activeChannel.value = channelKey
 }
 
 async function onSelectFile(uploadFile: { raw?: File }) {
@@ -452,7 +376,6 @@ function buildCurrentDraft(status: PublishDraft['status']): PublishDraft {
     id: activeDraftId.value || createDraftId(),
     title: form.title.trim(),
     content: form.content,
-    channel: activeChannel.value,
     topics: selectedTopics.value.map((topic) => ({ ...topic })),
     assets: uploadedAssets.value.map((asset) => ({ ...asset })),
     updatedAt: Date.now(),
@@ -499,7 +422,6 @@ function restoreDraft(draft: PublishDraft) {
   activeDraftId.value = draft.id
   form.title = draft.title || ''
   form.content = draft.content || ''
-  activeChannel.value = draft.channel || defaultPublishChannelKey
   selectedTopics.value = (draft.topics || []).map((topic) => ({ ...topic }))
   uploadedAssets.value = (draft.assets || []).map((asset) => ({ ...asset }))
   previewMode.value = uploadedAssets.value.length > 0 ? 'cover' : 'note'
@@ -511,7 +433,6 @@ function newDraft() {
   activeDraftId.value = ''
   form.title = ''
   form.content = ''
-  activeChannel.value = defaultPublishChannelKey
   selectedTopics.value = []
   uploadedAssets.value = []
   topicInput.value = ''
@@ -585,8 +506,6 @@ async function submit() {
     const payload: {
       title: string
       content: string
-      channel: string
-      channelCode: string
       postType: string
       imageUrls?: string[]
       tags?: string[]
@@ -596,8 +515,6 @@ async function submit() {
     } = {
       title: form.title.trim(),
       content: form.content.trim(),
-      channel: activeChannel.value,
-      channelCode: activeChannel.value,
       postType: currentPostType.value,
       ...(finalTopics.length > 0 ? { tags: finalTopics } : {}),
       ...(topicIds.length > 0 ? { topicIds } : {}),
@@ -739,23 +656,6 @@ async function submit() {
             </div>
           </div>
 
-          <div class="publish-studio__compose-row publish-studio__compose-row--channel">
-            <div class="publish-studio__compose-label">
-              <strong>发布频道</strong>
-            </div>
-            <div class="publish-studio__channel-tabs">
-              <button
-                v-for="channel in publishChannelOptions"
-                :key="channel.key"
-                type="button"
-                :class="{ 'is-selected': activeChannel === channel.key }"
-                @click="selectPublishChannel(channel.key)"
-              >
-                {{ channel.label }}
-              </button>
-            </div>
-          </div>
-
           <div class="publish-studio__compose-row">
             <div class="publish-studio__compose-label">
               <strong>封面设置</strong>
@@ -869,7 +769,7 @@ async function submit() {
                     <img :src="currentUserAvatar" alt="" />
                     <span>
                       <strong>{{ currentUserName }}</strong>
-                      <small>{{ currentChannelLabel }}</small>
+                      <small>{{ currentPublishScopeLabel }}</small>
                     </span>
                   </div>
 
@@ -1398,35 +1298,6 @@ async function submit() {
   align-self: center;
   color: #a0a7b3;
   font-size: 12px;
-}
-
-.publish-studio__channel-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-width: 0;
-}
-
-.publish-studio__channel-tabs button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 104px;
-  height: 44px;
-  padding: 0 14px;
-  border: 1px solid #e7ebf2;
-  border-radius: 8px;
-  background: #fbfcfe;
-  color: #4e5665;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.publish-studio__channel-tabs button.is-selected {
-  border-color: #ffd4cc;
-  background: #fff0ed;
-  color: #ff5a45;
-  font-weight: 760;
 }
 
 .publish-studio__cover-box {

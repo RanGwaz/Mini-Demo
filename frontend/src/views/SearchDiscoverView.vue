@@ -1,7 +1,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'SearchDiscoverView' })
 
-import { ArrowRight, Search } from '@element-plus/icons-vue'
+import { Search } from '@element-plus/icons-vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import FeedCardRenderer from '../components/feed/FeedCardRenderer.vue'
@@ -18,7 +18,6 @@ const result = ref<SearchResult>({
   posts: [],
   users: [],
   topics: [],
-  channels: [],
 })
 
 const trimmedKeyword = computed(() => keyword.value.trim())
@@ -26,7 +25,6 @@ const hasAnyResult = computed(() => (
   result.value.posts.length > 0
   || result.value.users.length > 0
   || result.value.topics.length > 0
-  || result.value.channels.length > 0
 ))
 
 watch(
@@ -69,7 +67,7 @@ function submitSearch() {
 
 async function runSearch() {
   if (!trimmedKeyword.value) {
-    result.value = { posts: [], users: [], topics: [], channels: [] }
+    result.value = { posts: [], users: [], topics: [] }
     return
   }
   loading.value = true
@@ -80,7 +78,6 @@ async function runSearch() {
       posts: data.posts || [],
       users: data.users || [],
       topics: data.topics || [],
-      channels: data.channels || [],
     }
   } catch (err) {
     error.value = err instanceof Error ? err.message : '搜索失败'
@@ -95,11 +92,11 @@ async function runSearch() {
     <header class="search-page__head">
       <form class="search-page__search" @submit.prevent="submitSearch">
         <el-icon><Search /></el-icon>
-        <input v-model="keyword" type="search" placeholder="搜索笔记、用户、标签、频道" />
+        <input v-model="keyword" type="search" placeholder="搜索笔记、用户或标签" />
         <button type="submit">搜索</button>
       </form>
       <p v-if="trimmedKeyword">搜索 “{{ trimmedKeyword }}”</p>
-      <p v-else>输入关键词发现内容、用户、标签和频道</p>
+      <p v-else>输入关键词发现内容、用户和标签</p>
     </header>
 
     <main class="search-page__body">
@@ -115,20 +112,6 @@ async function runSearch() {
       </div>
 
       <template v-else>
-        <section v-if="result.channels.length > 0" class="search-page__section">
-          <div class="search-page__section-head">
-            <h2>频道</h2>
-          </div>
-          <div class="search-page__channel-grid">
-            <button v-for="channel in result.channels" :key="channel.code" type="button" @click="router.push(`/channels/${channel.code}`)">
-              <span>{{ channel.name.slice(0, 1) }}</span>
-              <strong>{{ channel.name }}</strong>
-              <small>{{ channel.description || '内容频道' }}</small>
-              <em><ArrowRight /></em>
-            </button>
-          </div>
-        </section>
-
         <section v-if="result.topics.length > 0" class="search-page__section">
           <div class="search-page__section-head">
             <h2>标签</h2>
@@ -262,55 +245,10 @@ async function runSearch() {
   font-size: 18px;
 }
 
-.search-page__channel-grid,
 .search-page__post-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 12px;
-}
-
-.search-page__channel-grid button {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid #e8ebf0;
-  border-radius: 8px;
-  background: #fbfcfe;
-  color: #303744;
-  cursor: pointer;
-  text-align: left;
-}
-
-.search-page__channel-grid span {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 8px;
-  background: #fff0ed;
-  color: #ff5a45;
-  font-weight: 900;
-}
-
-.search-page__channel-grid strong,
-.search-page__channel-grid small {
-  grid-column: 2;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.search-page__channel-grid small {
-  color: #8a91a0;
-  font-size: 12px;
-}
-
-.search-page__channel-grid em {
-  grid-row: 1 / 3;
-  grid-column: 3;
-  color: #9aa1ad;
 }
 
 .search-page__topic-row {

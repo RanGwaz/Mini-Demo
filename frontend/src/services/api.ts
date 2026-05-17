@@ -31,7 +31,6 @@ export interface CreatePostAssetPayload {
 }
 
 export interface FeedQueryFilters {
-  channelCode?: string
   topic?: string
   topicId?: number
   topicSlug?: string
@@ -40,17 +39,6 @@ export interface FeedQueryFilters {
 }
 
 export type FeedRequestAuthMode = 'session' | 'guest'
-export type SocialFeedMode = 'following' | 'friends'
-
-export interface ChannelView {
-  code: string
-  name: string
-  description: string
-  icon?: string
-  sortOrder: number
-  postType: string
-  waterfall: boolean
-}
 
 export interface TopicView {
   id: number
@@ -123,37 +111,11 @@ export const api = {
         page,
         pageSize: size,
         ...(seed ? { seed } : {}),
-        ...(filters?.channelCode ? { channelCode: filters.channelCode } : {}),
         ...(filters?.topic ? { topic: filters.topic } : {}),
         ...(filters?.topicId ? { topicId: filters.topicId } : {}),
         ...(filters?.topicSlug ? { topicSlug: filters.topicSlug } : {}),
         ...(filters?.style ? { style: filters.style } : {}),
         ...(filters?.tag ? { tag: filters.tag } : {}),
-      },
-    }))
-  },
-  socialFeed(mode: SocialFeedMode, page = 1, size = 24) {
-    return unwrap<PageResponse<PostView>>(http.get('/api/feed/social', {
-      params: { mode, page, size },
-    }))
-  },
-  channels() {
-    return unwrap<ChannelView[]>(guestHttp.get('/api/channels'))
-  },
-  channelDetail(code: string) {
-    return unwrap<ChannelView>(guestHttp.get(`/api/channels/${code}`))
-  },
-  channelTopics(code: string, limit = 30) {
-    return unwrap<TopicView[]>(guestHttp.get(`/api/channels/${code}/topics`, { params: { limit } }))
-  },
-  channelPosts(code: string, page = 1, size = 24, sort: 'hot' | 'latest' = 'hot', topicSlug = '') {
-    return unwrap<PageResponse<PostView>>(guestHttp.get(`/api/channels/${code}/posts`, {
-      ...slowRequestConfig,
-      params: {
-        page,
-        size,
-        sort,
-        ...(topicSlug ? { topicSlug } : {}),
       },
     }))
   },
@@ -195,8 +157,6 @@ export const api = {
   createPost(payload: {
     title: string
     content: string
-    channel: string
-    channelCode?: string
     postType?: string
     imageUrls?: string[]
     extra?: Record<string, unknown>
@@ -351,9 +311,6 @@ export const api = {
   },
   searchUsers(keyword: string) {
     return unwrap<UserSummary[]>(http.get('/api/search/users', { ...slowRequestConfig, params: { keyword } }))
-  },
-  searchChannels(keyword: string) {
-    return unwrap<ChannelView[]>(guestHttp.get('/api/search/channels', { ...slowRequestConfig, params: { keyword } }))
   },
   searchPostsPage(keyword: string, page = 1, size = 12) {
     return unwrap<PageResponse<PostView>>(http.get('/api/search/posts/page', {

@@ -57,32 +57,13 @@ public interface TopicMapper extends BaseMapper<Topic> {
     Topic selectByName(@Param("name") String name);
 
     @Select("""
-            SELECT t.*
-            FROM topics t
-            JOIN topic_channel_bindings b ON b.topic_id = t.id
-            WHERE b.channel_code = #{channelCode}
-              AND b.status = 'ACTIVE'
-              AND t.status = 'ACTIVE'
-            ORDER BY b.weight DESC, t.hot_score DESC, t.post_count DESC, t.updated_at DESC
-            LIMIT #{limit}
-            """)
-    List<Topic> selectByChannel(@Param("channelCode") String channelCode,
-                                @Param("limit") int limit);
-
-    @Select("""
             SELECT related.*
             FROM topics source
-            JOIN topic_channel_bindings source_binding ON source_binding.topic_id = source.id
-            JOIN topic_channel_bindings related_binding ON related_binding.channel_code = source_binding.channel_code
-            JOIN topics related ON related.id = related_binding.topic_id
+            JOIN topics related ON related.id != source.id
             WHERE source.slug = #{slug}
               AND source.status = 'ACTIVE'
-              AND source_binding.status = 'ACTIVE'
-              AND related_binding.status = 'ACTIVE'
               AND related.status = 'ACTIVE'
-              AND related.id != source.id
-            GROUP BY related.id
-            ORDER BY MAX(related_binding.weight) DESC, related.hot_score DESC, related.post_count DESC, related.updated_at DESC
+            ORDER BY related.hot_score DESC, related.post_count DESC, related.updated_at DESC
             LIMIT #{limit}
             """)
     List<Topic> selectRelatedBySlug(@Param("slug") String slug,

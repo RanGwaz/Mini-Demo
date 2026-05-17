@@ -50,16 +50,8 @@ const mediaAspectRatio = computed(() => {
   if (props.variant === 'tech') return '16 / 10'
   return '3 / 3.8'
 })
-const channelCode = computed(() => props.post.channelCode || props.post.channel || 'general')
 const channelLabel = computed(() => {
-  switch (channelCode.value) {
-    case 'campus': return '校园生活'
-    case 'anime_outfit': return '二次元穿搭'
-    case 'pet': return '宠物日常'
-    case 'photography': return '摄影分享'
-    case 'tech_moment': return '程序员摸鱼'
-    default: return '动态'
-  }
+  return props.post.recommendationReason || '推荐内容'
 })
 const authorName = computed(() => props.post.author?.nickname || '匿名用户')
 const authorAvatar = computed(() => normalizeMediaUrl(props.post.author?.avatarUrl) || DEFAULT_IMAGE_PLACEHOLDER)
