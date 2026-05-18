@@ -1,3 +1,6 @@
+--liquibase formatted sql
+
+--changeset rangwaz:069-001-create-site-messages
 CREATE TABLE IF NOT EXISTS site_messages (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     sender_id BIGINT NULL,

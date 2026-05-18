@@ -4,7 +4,7 @@
 
 ```powershell
 cd H:\桌面\一坨屎\infra\docker
-docker compose up -d mysql redis minio minio-init etcd milvus attu kafka kafka-init reco-maintenance-scheduler
+docker compose up -d mysql redis minio minio-init etcd milvus attu kafka kafka-init
 ```
 
 Kafka is optional for local development because `APP_KAFKA_ENABLED` defaults to
@@ -12,7 +12,7 @@ Kafka is optional for local development because `APP_KAFKA_ENABLED` defaults to
 
 ```powershell
 cd H:\桌面\一坨屎\infra\docker
-docker compose up -d mysql redis minio minio-init etcd milvus attu reco-maintenance-scheduler
+docker compose up -d mysql redis minio minio-init etcd milvus attu
 ```
 
 ## Deep Rank Service
@@ -32,15 +32,8 @@ cd H:\桌面\一坨屎\frontend
 npm run dev
 ```
 
-## Recommendation Maintenance
+## Recommendation Rebuild
 
-Only one scheduler is kept now:
-
-| Job | Frequency | Purpose |
-| :--- | :--- | :--- |
-| feature | 5 minutes | Refresh `user_features`, `post_features`, and Redis behavior sequences. |
-| i2i | 60 minutes | Refresh `post_i2i_neighbors` for similar-post and collaborative recall. |
-
-The old `embedding`, `taxonomy`, and `user-embeddings` schedulers are no longer
-always-on tasks. Run them manually only when importing lots of new content or
-doing a full offline rebuild. See `infra/docker/RECO_JOBS.md`.
+No always-on recommendation scheduler is kept. After importing a fresh Pinterest
+dataset, run the model/recommendation scripts manually for feature, embedding,
+i2i, training, and evaluation rebuilds.

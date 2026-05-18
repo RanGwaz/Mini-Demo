@@ -219,46 +219,6 @@ services:
       timeout: 5s
       retries: 20
 
-  reco-maintenance-scheduler:
-    image: python:3.11-slim
-    container_name: image-social-reco-maintenance-scheduler
-    profiles: ["feature"]
-    working_dir: /app/scripts
-    volumes:
-      - ../../backend/scripts:/app/scripts
-      - ./models:/models
-      - ./data/reco-jobs:/app/logs
-      - ./data/hf-cache:/root/.cache/huggingface
-    environment:
-      TZ: Asia/Shanghai
-      MYSQL_HOST: mysql
-      MYSQL_PORT: 3306
-      MYSQL_USER: root
-      MYSQL_PASSWORD: root123456
-      MYSQL_DATABASE: image_social
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_DB: 0
-      MILVUS_HOST: milvus
-      MILVUS_PORT: 19530
-      MINIO_INTERNAL_ENDPOINT: http://minio:9000
-      TAG_VOCAB_OUT: /models/tag_vocabulary.json
-      I2I_LOOKBACK_DAYS: 30
-      I2I_TOP_N: 100
-      RECO_FEATURE_INTERVAL_SECONDS: 300
-      RECO_I2I_INTERVAL_SECONDS: 3600
-      PYTHONUNBUFFERED: "1"
-    depends_on:
-      mysql:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    command: >
-      /bin/sh -c "
-      pip install --no-cache-dir -r requirements-reco-maintenance.txt &&
-      python reco_maintenance_scheduler.py 2>&1 | tee -a /app/logs/reco_maintenance.log
-      "
-
   deep-rank-service:
     build:
       context: ./deep-rank-service

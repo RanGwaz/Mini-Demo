@@ -87,7 +87,7 @@ function buildSkeletonColumns(count: number, rows: number) {
 
 function estimatedCardUnits(post: PostView) {
   const ratio = ratioNumber(postAspectRatio(post))
-  const bodyUnits = post.title || post.content ? 0.44 : 0.2
+  const bodyUnits = post.title ? 0.36 : 0.18
   return (1 / ratio) + bodyUnits
 }
 
@@ -121,13 +121,7 @@ function authorAvatar(post: PostView) {
 }
 
 function titleText(post: PostView) {
-  return post.title?.trim() || post.content?.trim() || '未命名内容'
-}
-
-function descriptionText(post: PostView) {
-  const content = post.content?.trim()
-  if (!content || content === post.title?.trim()) return ''
-  return content
+  return post.title?.trim() || '未命名内容'
 }
 
 function displayedLikeCount(post: PostView) {
@@ -357,7 +351,6 @@ onUnmounted(() => {
 
             <div class="feed-card__body">
               <h2>{{ titleText(post) }}</h2>
-              <p v-if="descriptionText(post)">{{ descriptionText(post) }}</p>
               <div class="feed-card__meta">
                 <img :src="authorAvatar(post)" alt="" loading="lazy" decoding="async" />
                 <span>{{ post.author?.nickname || post.author?.username || '用户' }}</span>
@@ -481,17 +474,6 @@ onUnmounted(() => {
   font-size: 15px;
   font-weight: 800;
   line-height: 1.45;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.feed-card__body p {
-  display: -webkit-box;
-  margin: 0;
-  overflow: hidden;
-  color: #606879;
-  font-size: 13px;
-  line-height: 1.5;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }

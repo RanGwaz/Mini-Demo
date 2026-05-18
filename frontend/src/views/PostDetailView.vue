@@ -8,9 +8,7 @@ import {
   Loading,
   MoreFilled,
   Promotion,
-  RefreshRight,
   Share,
-  Star,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -59,9 +57,7 @@ const relatedError = ref('')
 const relatedPage = ref(1)
 const relatedHasMore = ref(true)
 const relatedSentinelRef = ref<HTMLElement | null>(null)
-const relatedColumnCount = ref(4)
-const mediaRef = ref<HTMLElement | null>(null)
-const metaMaxHeight = ref<number | null>(null)
+const relatedColumnCount = ref(3)
 
 const COMMENT_PAGE_SIZE = 12
 const RELATED_PAGE_SIZE = 18
@@ -77,11 +73,6 @@ const authorAvatar = computed(() => normalizeMediaUrl(post.value?.author.avatarU
 
 const postAssets = computed(() => getPostMediaAssets(post.value))
 const hasDetailMedia = computed(() => postAssets.value.length > 0)
-const isMetaScrollMode = computed(() => hasDetailMedia.value && typeof metaMaxHeight.value === 'number' && metaMaxHeight.value > 0)
-const metaScrollStyle = computed(() => {
-  if (!isMetaScrollMode.value || !metaMaxHeight.value) return undefined
-  return { height: `${metaMaxHeight.value}px`, maxHeight: `${metaMaxHeight.value}px` }
-})
 
 const activeCoverUrl = computed(() => {
   const current = post.value
@@ -95,7 +86,10 @@ const lightboxImageUrl = computed(() => {
   if (!post.value || !hasDetailMedia.value) return ''
   return getPostFullMediaUrl(post.value, Math.min(activeAssetIndex.value, postAssets.value.length - 1)) || activeCoverUrl.value
 })
-const relatedMasonryColumns = computed(() => distributeRelatedIntoColumns(relatedPosts.value))
+const relatedSidePosts = computed(() => relatedPosts.value.filter((_, index) => index % 2 === 0))
+const relatedBelowPosts = computed(() => relatedPosts.value.filter((_, index) => index % 2 === 1))
+const relatedSideMasonryColumns = computed(() => distributeRelatedIntoColumns(relatedSidePosts.value))
+const relatedBelowMasonryColumns = computed(() => distributeRelatedIntoColumns(relatedBelowPosts.value))
 
 function formatCount(value?: number | null) {
   const n = Number(value || 0)
@@ -168,9 +162,7 @@ function openAuthor() {
 
 function computeRelatedColumnCount() {
   const width = window.innerWidth
-  if (width >= 1880) return 5
-  if (width >= 1480) return 4
-  if (width >= 1120) return 3
+  if (width >= 1280) return 3
   if (width >= 760) return 2
   return 1
 }
@@ -180,16 +172,7 @@ function updateRelatedColumnCount() {
 }
 
 function syncMetaHeight() {
-  if (typeof window === 'undefined' || !hasDetailMedia.value || window.innerWidth <= 1400) {
-    metaMaxHeight.value = null
-    return
-  }
-
-  const mediaElement = mediaRef.value
-  if (!mediaElement) return
-
-  const height = Math.floor(mediaElement.getBoundingClientRect().height)
-  if (height > 0) metaMaxHeight.value = height
+  // Images are constrained with max-width/max-height now, so meta no longer mirrors media height.
 }
 
 function handleWindowResize() {
@@ -220,7 +203,7 @@ function relatedEstimatedHeight(postItem: PostView) {
         const [w, h] = relatedFallbackRatio(postItem.id).split('/').map((value) => Number(value.trim()))
         return (h || 4) / (w || 3)
       })()
-  const textWeight = Math.min((postItem.title?.length || 0) / 48 + (postItem.content?.length || 0) / 180, 0.95)
+  const textWeight = Math.min((postItem.title?.length || 0) / 48, 0.45)
   return mediaRatio + 0.62 + textWeight
 }
 
@@ -526,9 +509,8 @@ onUnmounted(() => {
 
     <main class="detail-page__main">
       <section class="detail-page__focus">
-        <button type="button" class="detail-page__back-btn" @click="backToFeed">
+        <button type="button" class="detail-page__back-btn" aria-label="返回首页" @click="backToFeed">
           <el-icon><ArrowLeft /></el-icon>
-          返回
         </button>
 
         <div v-if="detailLoading" class="detail-page__state">
@@ -542,10 +524,34 @@ onUnmounted(() => {
         </div>
 
         <div v-else-if="post" class="detail-page__panel" :class="{ 'is-text-only': !hasDetailMedia }">
-          <div v-if="hasDetailMedia" ref="mediaRef" class="detail-page__media">
+          <div class="detail-page__toolbar">
+            <div class="detail-page__toolbar-left">
+              <button type="button" :class="['detail-page__toolbar-action', { 'is-active': liked }]" @click="toggleLike">
+                <span>♡</span>
+                <strong>{{ formatCount(post.likeCount) }}</strong>
+              </button>
+              <button type="button" class="detail-page__toolbar-action" aria-label="评论">
+                <el-icon><ChatLineRound /></el-icon>
+              </button>
+              <button type="button" class="detail-page__toolbar-action" aria-label="分享" @click="trackShare">
+                <el-icon><Share /></el-icon>
+              </button>
+              <button type="button" class="detail-page__toolbar-action" aria-label="更多">
+                <el-icon><MoreFilled /></el-icon>
+              </button>
+            </div>
+            <div class="detail-page__toolbar-right">
+              <button type="button" class="detail-page__profile-btn" @click="openAuthor">个人资料</button>
+              <button type="button" :class="['detail-page__save-btn', { 'is-active': favorited }]" @click="toggleFavorite">保存</button>
+            </div>
+          </div>
+
+          <div v-if="hasDetailMedia" class="detail-page__media">
             <div class="detail-page__media-wrap">
               <img :src="activeCoverUrl" :alt="post.title || '作品图片'" @click="openLightbox" @load="syncMetaHeight" @error="onPostCoverError(post)" />
-              <button type="button" class="detail-page__zoom-btn" @click="openLightbox">查看大图</button>
+              <button type="button" class="detail-page__zoom-btn" aria-label="查看大图" @click="openLightbox">
+                <el-icon><ArrowRight /></el-icon>
+              </button>
               <button v-if="postAssets.length > 1" type="button" class="detail-page__asset-arrow is-left" @click="showPrevAsset">
                 <el-icon><ArrowLeft /></el-icon>
               </button>
@@ -564,7 +570,7 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div class="detail-page__meta" :class="{ 'is-scrollable': isMetaScrollMode }" :style="metaScrollStyle">
+          <div class="detail-page__meta">
             <header class="detail-page__author">
               <button type="button" class="detail-page__author-main" @click="openAuthor">
                 <img :src="authorAvatar" :alt="post.author.nickname" />
@@ -573,22 +579,12 @@ onUnmounted(() => {
                   <small>{{ formatRelativeTime(post.createdAt) }} · 作者</small>
                 </span>
               </button>
-              <div class="detail-page__author-actions">
-                <button v-if="canFollow" type="button" :class="['detail-page__follow', { 'is-following': followingAuthor }]" @click="toggleFollow">
-                  {{ followingAuthor ? '已关注' : '+ 关注' }}
-                </button>
-                <button type="button" class="detail-page__icon-btn"><el-icon><MoreFilled /></el-icon></button>
-              </div>
+              <button v-if="canFollow" type="button" :class="['detail-page__follow', { 'is-following': followingAuthor }]" @click="toggleFollow">
+                {{ followingAuthor ? '已关注' : '+ 关注' }}
+              </button>
             </header>
 
             <PostDetailRenderer :post="post" />
-
-            <div class="detail-page__actions">
-              <button type="button" :class="{ 'is-active': liked }" @click="toggleLike"><span>♡</span>{{ formatCount(post.likeCount) }}</button>
-              <button type="button"><el-icon><ChatLineRound /></el-icon>{{ formatCount(post.commentCount) }}</button>
-              <button type="button" @click="trackShare"><el-icon><Share /></el-icon>{{ formatCount(post.shareCount) }}</button>
-              <button type="button" :class="{ 'is-active': favorited }" @click="toggleFavorite"><el-icon><Star /></el-icon>收藏</button>
-            </div>
 
             <section class="detail-page__comments">
               <div class="detail-page__comments-head">
@@ -619,6 +615,38 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <div v-if="relatedBelowPosts.length > 0" class="detail-page__below-waterfall">
+          <div class="detail-page__related-waterfall" :style="{ '--column-count': String(relatedColumnCount) }">
+            <div v-for="(column, columnIndex) in relatedBelowMasonryColumns" :key="`below-col-${columnIndex}`" class="detail-page__related-column">
+              <article
+                v-for="item in column"
+                :key="item.id"
+                class="detail-page__related-card"
+                :class="{ 'is-text-only': !hasPostMedia(item) }"
+                @click="openRelatedPost(item.id)"
+              >
+                <div v-if="hasPostMedia(item)" class="detail-page__related-cover" :style="{ aspectRatio: relatedCoverAspectRatio(item) }">
+                  <img :src="resolveCover(item)" :alt="item.title || '帖子图片'" loading="lazy" @error="onPostCoverError(item)" />
+                </div>
+                <div class="detail-page__related-body">
+                  <header>
+                    <img :src="normalizeMediaUrl(item.author.avatarUrl) || '/auto_picture.png'" :alt="item.author.nickname" loading="lazy" />
+                    <span>
+                      <strong>{{ item.author.nickname }}</strong>
+                      <small>{{ formatRelativeTime(item.createdAt) }}</small>
+                    </span>
+                  </header>
+                  <h3>{{ item.title || '未命名作品' }}</h3>
+                  <div class="detail-page__related-actions">
+                    <span>♡ {{ formatCount(item.likeCount) }}</span>
+                    <span>评 {{ formatCount(item.commentCount) }}</span>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </div>
+        </div>
+
         <div v-if="lightboxOpen && lightboxImageUrl" class="detail-page__lightbox" @click.self="closeLightbox">
           <button type="button" class="detail-page__lightbox-close" aria-label="关闭大图" @click="closeLightbox">×</button>
           <button v-if="postAssets.length > 1" type="button" class="detail-page__lightbox-arrow is-left" aria-label="上一张" @click="showPrevAsset">
@@ -632,16 +660,8 @@ onUnmounted(() => {
       </section>
 
       <section class="detail-page__related">
-        <header class="detail-page__related-head">
-          <h2>继续浏览</h2>
-          <button type="button" @click="loadMoreRelated()">
-            <el-icon><RefreshRight /></el-icon>
-            换一换
-          </button>
-        </header>
-
         <div class="detail-page__related-waterfall" :style="{ '--column-count': String(relatedColumnCount) }">
-          <div v-for="(column, columnIndex) in relatedMasonryColumns" :key="`related-col-${columnIndex}`" class="detail-page__related-column">
+          <div v-for="(column, columnIndex) in relatedSideMasonryColumns" :key="`related-col-${columnIndex}`" class="detail-page__related-column">
             <article
               v-for="item in column"
               :key="item.id"
@@ -661,10 +681,9 @@ onUnmounted(() => {
                   </span>
                 </header>
                 <h3>{{ item.title || '未命名作品' }}</h3>
-                <p v-if="item.content">{{ item.content }}</p>
                 <div class="detail-page__related-actions">
                   <span>♡ {{ formatCount(item.likeCount) }}</span>
-                  <span>💬 {{ formatCount(item.commentCount) }}</span>
+                  <span>评 {{ formatCount(item.commentCount) }}</span>
                 </div>
               </div>
             </article>
@@ -1379,6 +1398,381 @@ onUnmounted(() => {
 
   .detail-page__related-head h2 {
     font-size: 19px;
+  }
+}
+.detail-page {
+  min-height: calc(100vh - 74px);
+  padding: 16px 20px 44px 96px;
+  background: #fff;
+}
+
+.detail-page__main {
+  display: grid;
+  grid-template-columns: minmax(780px, 884px) minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+  min-width: 0;
+}
+
+.detail-page__focus,
+.detail-page__related {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.detail-page__focus {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  padding: 0;
+}
+
+.detail-page__back-btn {
+  position: sticky;
+  top: 90px;
+  z-index: 7;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 50%;
+  background: #fff;
+  color: #111;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.detail-page__back-btn:hover {
+  background: #f1f1f1;
+}
+
+.detail-page__state {
+  grid-column: 1 / -1;
+}
+
+.detail-page__panel {
+  grid-column: 2;
+  display: block;
+  overflow: visible;
+  border: 1px solid #d9d9d9;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: none;
+}
+
+.detail-page__toolbar {
+  position: sticky;
+  top: 74px;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 64px;
+  padding: 8px 16px;
+  border-bottom: 1px solid rgba(17, 24, 39, 0.08);
+  border-radius: 18px 18px 0 0;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 1px 10px rgba(17, 24, 39, 0.05);
+}
+
+.detail-page__toolbar-left,
+.detail-page__toolbar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.detail-page__toolbar-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 38px;
+  height: 38px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #050505;
+  font-size: 24px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.detail-page__toolbar-action strong {
+  font-size: 15px;
+}
+
+.detail-page__toolbar-action.is-active,
+.detail-page__toolbar-action:hover {
+  background: #f1f1f1;
+}
+
+.detail-page__profile-btn {
+  max-width: 132px;
+  overflow: hidden;
+  border: none;
+  background: transparent;
+  color: #050505;
+  font-size: 15px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.detail-page__save-btn {
+  height: 48px;
+  padding: 0 20px;
+  border: none;
+  border-radius: 18px;
+  background: #e60023;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.detail-page__save-btn.is-active {
+  background: #111827;
+}
+
+.detail-page__media {
+  background: #fff;
+}
+
+.detail-page__media-wrap {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  height: auto;
+  min-height: 0;
+  padding: 0 24px 20px;
+  overflow: visible;
+  border: none;
+  border-radius: 0;
+  background: #fff;
+}
+
+.detail-page__media-wrap img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: min(100%, 520px);
+  max-height: min(860px, calc(100vh - 164px));
+  border-radius: 18px;
+  object-fit: contain;
+  cursor: zoom-in;
+}
+
+.detail-page__zoom-btn {
+  position: absolute;
+  right: 42px;
+  bottom: 36px;
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  padding: 0;
+  border: none;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.68);
+  color: #111;
+  font-size: 18px;
+  backdrop-filter: blur(10px);
+}
+
+.detail-page__asset-arrow {
+  background: rgba(17, 24, 39, 0.52);
+}
+
+.detail-page__asset-dots {
+  padding: 0 0 16px;
+}
+
+.detail-page__meta {
+  display: grid;
+  gap: 16px;
+  min-height: 0;
+  padding: 0 16px 16px;
+  border-top: none;
+}
+
+.detail-page__author {
+  padding-top: 2px;
+  border-bottom: 1px solid rgba(17, 24, 39, 0.08);
+  padding-bottom: 14px;
+}
+
+.detail-page__author-actions,
+.detail-page__icon-btn,
+.detail-page__actions {
+  display: none;
+}
+
+.detail-page__comments {
+  display: grid;
+  gap: 10px;
+  height: auto;
+  min-height: 0;
+}
+
+.detail-page__comments-list {
+  max-height: none;
+  overflow: visible;
+  padding-right: 0;
+}
+
+.detail-page__comment-editor {
+  position: static;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  padding: 4px 6px 4px 14px;
+}
+
+.detail-page__below-waterfall {
+  grid-column: 2;
+  margin-top: 16px;
+}
+
+.detail-page__related {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.detail-page__related-waterfall {
+  display: grid;
+  grid-template-columns: repeat(var(--column-count), minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.detail-page__related-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.detail-page__related-card {
+  overflow: hidden;
+  border: none;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: none;
+  cursor: pointer;
+  transition: background 0.16s ease;
+}
+
+.detail-page__related-card:hover {
+  transform: none;
+  background: #f5f5f5;
+  box-shadow: none;
+}
+
+.detail-page__related-cover {
+  overflow: hidden;
+  border-radius: 16px;
+  background: #f2f2f2;
+}
+
+.detail-page__related-cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.detail-page__related-body {
+  padding: 8px 4px 12px;
+}
+
+.detail-page__related-body p,
+.detail-page__related-head {
+  display: none;
+}
+
+.detail-page__related-body h3 {
+  margin-top: 8px;
+  color: #111;
+  font-size: 14px;
+  font-weight: 760;
+  line-height: 1.35;
+}
+
+.detail-page__related-actions {
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+@media (max-width: 1400px) {
+  .detail-page {
+    padding-left: 96px;
+  }
+
+  .detail-page__main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .detail-page__related {
+    margin-top: 16px;
+    padding-left: 64px;
+  }
+}
+
+@media (max-width: 780px) {
+  .detail-page {
+    padding: 10px;
+  }
+
+  .detail-page__focus {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-page__back-btn {
+    position: static;
+    margin-bottom: 8px;
+  }
+
+  .detail-page__panel,
+  .detail-page__below-waterfall {
+    grid-column: 1;
+  }
+
+  .detail-page__toolbar {
+    top: 62px;
+    gap: 8px;
+    padding-inline: 10px;
+  }
+
+  .detail-page__toolbar-left,
+  .detail-page__toolbar-right {
+    gap: 8px;
+  }
+
+  .detail-page__profile-btn {
+    display: none;
+  }
+
+  .detail-page__media-wrap {
+    padding-inline: 10px;
+  }
+
+  .detail-page__media-wrap img {
+    max-width: 100%;
+    max-height: none;
+  }
+
+  .detail-page__related {
+    padding-left: 0;
   }
 }
 </style>

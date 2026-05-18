@@ -105,7 +105,7 @@ npm run build
 
 ## 7. 上线后巡检
 
-1. 执行 `backend/scripts/production_smoke_check.py` 检查健康、频道、话题、Feed。
+1. 手动检查健康接口、首页推荐流、详情页相似流、发布流程和消息功能。
 2. 观察 API 延迟、错误率、Feed 空结果率、召回失败率。
 3. 每日备份 MySQL、MinIO、Milvus、Elasticsearch。
 4. 每次导入内容后重新检查搜索、特征、I2I、详情页图片和首页推荐。

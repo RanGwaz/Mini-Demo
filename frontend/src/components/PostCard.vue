@@ -223,7 +223,6 @@ function openAuthorProfile() {
       <img v-if="hasMedia" :src="coverUrl" :alt="post.title" class="post-card__cover" />
       <div class="post-card__content">
         <h3>{{ post.title }}</h3>
-        <p>{{ post.content || '作者没有填写正文。' }}</p>
       </div>
     </div>
 

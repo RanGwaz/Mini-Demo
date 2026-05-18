@@ -145,7 +145,6 @@ function formatCount(value?: number | null) {
       </div>
 
       <h3>{{ post.title || '分享一刻值得收藏的日常' }}</h3>
-      <p v-if="post.content?.trim()" class="channel-card__desc">{{ post.content }}</p>
 
       <dl v-if="metaItems.length > 0" class="channel-card__meta">
         <template v-for="item in metaItems" :key="item.label">
@@ -282,18 +281,6 @@ function formatCount(value?: number | null) {
   line-height: 1.48;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-}
-
-.channel-card__desc {
-  display: -webkit-box;
-  margin: 0;
-  overflow: hidden;
-  color: #5f6674;
-  font-size: 13px;
-  line-height: 1.55;
-  word-break: break-word;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
 }
 
 .channel-card__meta {

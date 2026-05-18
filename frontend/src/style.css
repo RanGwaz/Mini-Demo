@@ -1065,11 +1065,6 @@ html[data-theme='dark'] .douyin-search:focus-within {
   margin: 0 0 12px;
 }
 
-.post-card__content p {
-  margin: 0 0 12px;
-  color: var(--text-secondary);
-}
-
 .comment-item {
   margin-bottom: 10px;
 }

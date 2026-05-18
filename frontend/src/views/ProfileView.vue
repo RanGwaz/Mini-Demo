@@ -337,7 +337,6 @@ onMounted(() => {
 
               <div class="profile-home__card-body">
                 <h3>{{ item.title || '未命名动态' }}</h3>
-                <p :class="{ 'is-empty': !item.content }">{{ item.content || ' ' }}</p>
                 <small :class="{ 'is-empty': !item.tags?.length }">
                   <template v-if="item.tags?.length">
                     <template v-for="tag in item.tags.slice(0, 3)" :key="tag">#{{ tag }} </template>
@@ -767,11 +766,6 @@ onMounted(() => {
   -webkit-line-clamp: 3;
 }
 
-.profile-home__card.is-text-only .profile-home__card-body p {
-  min-height: calc(1.5em * 6);
-  -webkit-line-clamp: 6;
-}
-
 .profile-home__card-cover {
   position: relative;
   overflow: hidden;
@@ -816,18 +810,6 @@ onMounted(() => {
   -webkit-line-clamp: 2;
 }
 
-.profile-home__card-body p {
-  display: -webkit-box;
-  min-height: calc(1.5em * 2);
-  margin: 5px 0 0;
-  overflow: hidden;
-  color: #646d7d;
-  font-size: 14px;
-  line-height: 1.5;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
 .profile-home__card-body small {
   display: block;
   min-height: 1.3em;
@@ -836,7 +818,6 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.profile-home__card-body p.is-empty,
 .profile-home__card-body small.is-empty {
   visibility: hidden;
 }
