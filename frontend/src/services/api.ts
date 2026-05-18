@@ -1,327 +1,114 @@
-import http, { guestHttp, LONG_REQUEST_TIMEOUT_MS, unwrap } from './http'
+/** HTTP client and typed API helpers for the React frontend. */
 import type {
+  ApiResponse,
   AuthTokenResponse,
-  BindPhoneRequest,
-  ChangeUserNoRequest,
   CommentView,
-  HttpMethod,
-  MessageConversationView,
-  MessageItemView,
-  MessageSummaryResponse,
+  FollowStatus,
   PageResponse,
-  PhoneSmsLoginRequest,
   PostInteractionStatus,
   PostView,
   SearchResult,
-  FollowStatus,
   ToggleResult,
+  TopicView,
   UploadResponse,
   UserStats,
   UserSummary,
 } from '../types'
 
-export interface CreatePostAssetPayload {
-  objectKey: string
-  fileUrl: string
-  fileType: string
-  thumbUrl?: string
-  width?: number
-  height?: number
-  sortOrder: number
+const TOKEN_KEY = 'rangwaz-token'
+
+export function getToken() {
+  return localStorage.getItem(TOKEN_KEY) || ''
 }
 
-export interface FeedQueryFilters {
-  topic?: string
-  topicId?: number
-  topicSlug?: string
-  style?: string
-  tag?: string
+export function setToken(token: string) {
+  if (token) localStorage.setItem(TOKEN_KEY, token)
+  else localStorage.removeItem(TOKEN_KEY)
 }
 
-export type FeedRequestAuthMode = 'session' | 'guest'
-
-export interface TopicView {
-  id: number
-  name: string
-  slug: string
-  description?: string
-  coverUrl?: string
-  status?: string
-  riskLevel?: string
-  topicType?: string
-  postCount?: number
-  followerCount?: number
-  hotScore?: number
-}
-
-export interface UserInterestFacetView {
-  facetType: string
-  facetKey: string
-  facetLabel: string
-  weight?: number
-}
-
-export interface UserInterestsResponse {
-  userId: number
-  facets: UserInterestFacetView[]
-  updatedAt?: string
-}
-
-export interface UserInterestFacetPayload {
-  facetType?: string
-  facetKey: string
-  facetLabel?: string
-  weight?: number
-}
-
-const slowRequestConfig = {
-  timeout: LONG_REQUEST_TIMEOUT_MS,
+async function request<T>(path: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers)
+  const token = getToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  if (!(init.body instanceof FormData) && init.body !== undefined) headers.set('Content-Type', 'application/json')
+  const response = await fetch(path, { ...init, headers })
+  const payload = (await response.json()) as ApiResponse<T>
+  if (!response.ok || !payload.success) throw new Error(payload.message || '请求失败')
+  return payload.data
 }
 
 export const api = {
   register(payload: { username: string; password: string; nickname: string }) {
-    return unwrap<AuthTokenResponse>(http.post('/api/auth/register', payload))
+    return request<AuthTokenResponse>('/api/auth/register', { method: 'POST', body: JSON.stringify(payload) })
   },
   login(payload: { username: string; password: string }) {
-    return unwrap<AuthTokenResponse>(http.post('/api/auth/login', payload))
-  },
-  sendSmsCode(phone: string) {
-    return unwrap<void>(http.post('/api/auth/sms/send', { phone }))
-  },
-  phoneSmsLogin(payload: PhoneSmsLoginRequest) {
-    return unwrap<AuthTokenResponse>(http.post('/api/auth/sms/login', payload))
-  },
-  logout() {
-    return unwrap<void>(http.post('/api/auth/logout'))
-  },
-  bindPhone(payload: BindPhoneRequest) {
-    return unwrap<void>(http.post('/api/auth/bind-phone', payload))
-  },
-  changeUserNo(payload: ChangeUserNoRequest) {
-    return unwrap<AuthTokenResponse>(http.put('/api/auth/user-no', payload))
+    return request<AuthTokenResponse>('/api/auth/login', { method: 'POST', body: JSON.stringify(payload) })
   },
   me() {
-    return unwrap<AuthTokenResponse>(http.get('/api/auth/me'))
+    return request<AuthTokenResponse>('/api/auth/me')
   },
-  homeFeed(page = 1, size = 50, seed?: string, filters?: FeedQueryFilters, authMode: FeedRequestAuthMode = 'session') {
-    const client = authMode === 'guest' ? guestHttp : http
-    return unwrap<PageResponse<PostView>>(client.get('/api/feed', {
-      ...slowRequestConfig,
-      params: {
-        page,
-        pageSize: size,
-        ...(seed ? { seed } : {}),
-        ...(filters?.topic ? { topic: filters.topic } : {}),
-        ...(filters?.topicId ? { topicId: filters.topicId } : {}),
-        ...(filters?.topicSlug ? { topicSlug: filters.topicSlug } : {}),
-        ...(filters?.style ? { style: filters.style } : {}),
-        ...(filters?.tag ? { tag: filters.tag } : {}),
-      },
-    }))
+  homeFeed(page = 1, pageSize = 30) {
+    return request<PageResponse<PostView>>(`/api/feed?page=${page}&pageSize=${pageSize}`)
   },
-  searchTopics(keyword = '', limit = 20) {
-    return unwrap<TopicView[]>(guestHttp.get('/api/topics/search', {
-      params: {
-        ...(keyword ? { keyword } : {}),
-        limit,
-      },
-    }))
+  similarPosts(postId: number, page = 1, size = 24) {
+    return request<PageResponse<PostView>>(`/api/feed/posts/${postId}/similar?page=${page}&size=${size}`)
   },
-  trendingTopics(limit = 20) {
-    return unwrap<TopicView[]>(guestHttp.get('/api/topics/trending', { params: { limit } }))
+  postDetail(postId: number) {
+    return request<PostView>(`/api/posts/${postId}`)
   },
-  similarPosts(postId: number, page = 1, size = 24, filters?: FeedQueryFilters, authMode: FeedRequestAuthMode = 'session') {
-    const client = authMode === 'guest' ? guestHttp : http
-    return unwrap<PageResponse<PostView>>(client.get(`/api/feed/posts/${postId}/similar`, {
-      ...slowRequestConfig,
-      params: {
-        page,
-        size,
-        ...(filters?.topic ? { topic: filters.topic } : {}),
-        ...(filters?.topicId ? { topicId: filters.topicId } : {}),
-        ...(filters?.topicSlug ? { topicSlug: filters.topicSlug } : {}),
-        ...(filters?.style ? { style: filters.style } : {}),
-        ...(filters?.tag ? { tag: filters.tag } : {}),
-      },
-    }))
+  trackPostClick(postId: number, scene = 'feed', position?: number) {
+    const query = new URLSearchParams({ scene })
+    if (position) query.set('position', String(position))
+    return request<void>(`/api/posts/${postId}/click?${query.toString()}`, { method: 'POST' })
+  },
+  trackPostShare(postId: number) {
+    return request<void>(`/api/posts/${postId}/share`, { method: 'POST' })
+  },
+  createPost(payload: unknown) {
+    return request<PostView>('/api/posts', { method: 'POST', body: JSON.stringify(payload) })
   },
   uploadImage(file: File) {
-    const formData = new FormData()
-    formData.append('file', file)
-    return unwrap<UploadResponse>(
-      http.post('/api/media/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      }),
-    )
-  },
-  createPost(payload: {
-    title: string
-    content: string
-    postType?: string
-    imageUrls?: string[]
-    extra?: Record<string, unknown>
-    tags?: string[]
-    topicIds?: number[]
-    topics?: string[]
-    assets?: CreatePostAssetPayload[]
-  }) {
-    return unwrap<PostView>(http.post('/api/posts', payload))
-  },
-  trackBehavior(payload: {
-    postId: number
-    channelCode?: string
-    behaviorType: string
-    duration?: number
-    scene?: string
-    position?: number
-  }) {
-    return unwrap<void>(http.post('/api/behaviors', payload))
-  },
-  postDetail(postId: number, scene = 'detail', authMode: FeedRequestAuthMode = 'session') {
-    const client = authMode === 'guest' ? guestHttp : http
-    return unwrap<PostView>(client.get(`/api/posts/${postId}`, { params: { scene } }))
-  },
-  trackPostClick(postId: number, payload?: { scene?: string; position?: number; method?: HttpMethod }) {
-    const scene = payload?.scene ?? 'feed'
-    const position = payload?.position
-    const method = payload?.method ?? 'post'
-    if (method === 'get') {
-      return unwrap<void>(http.get(`/api/posts/${postId}/click`, { params: { scene, position } }))
-    }
-    return unwrap<void>(http.post(`/api/posts/${postId}/click`, null, { params: { scene, position } }))
-  },
-  trackPostShare(postId: number, scene = 'detail') {
-    return unwrap<void>(http.post(`/api/posts/${postId}/share`, null, { params: { scene } }))
-  },
-  deletePost(postId: number) {
-    return unwrap<void>(http.delete(`/api/posts/${postId}`))
-  },
-  profile(userId: number) {
-    return unwrap<UserSummary>(http.get(`/api/users/${userId}`))
-  },
-  userStats(userId: number) {
-    return unwrap<UserStats>(http.get(`/api/users/${userId}/stats`))
-  },
-  updateProfile(payload: { nickname?: string; avatarUrl?: string; backgroundUrl?: string; bio?: string }) {
-    return unwrap<UserSummary>(http.put('/api/users/me', payload))
-  },
-  myInterests() {
-    return unwrap<UserInterestsResponse>(http.get('/api/users/me/interests'))
-  },
-  updateMyInterests(payload: { facets: UserInterestFacetPayload[] }) {
-    return unwrap<UserInterestsResponse>(http.put('/api/users/me/interests', payload))
-  },
-  userPosts(userId: number, limit = 20) {
-    return unwrap<PostView[]>(http.get(`/api/users/${userId}/posts`, { params: { limit } }))
-  },
-  following(userId: number) {
-    return unwrap<UserSummary[]>(http.get(`/api/social/following/${userId}`))
-  },
-  followingPage(userId: number, page = 1, size = 20) {
-    return unwrap<PageResponse<UserSummary>>(http.get(`/api/social/following/${userId}/page`, { params: { page, size } }))
-  },
-  followers(userId: number) {
-    return unwrap<UserSummary[]>(http.get(`/api/social/followers/${userId}`))
-  },
-  followersPage(userId: number, page = 1, size = 20) {
-    return unwrap<PageResponse<UserSummary>>(http.get(`/api/social/followers/${userId}/page`, { params: { page, size } }))
-  },
-  follow(userId: number, scene = 'unknown') {
-    return unwrap<void>(http.post(`/api/social/follow/${userId}`, null, { params: { scene } }))
-  },
-  unfollow(userId: number, scene = 'unknown') {
-    return unwrap<void>(http.delete(`/api/social/follow/${userId}`, { params: { scene } }))
-  },
-  followStatus(userId: number) {
-    return unwrap<FollowStatus>(http.get(`/api/social/follow-status/${userId}`))
-  },
-  messageSummary() {
-    return unwrap<MessageSummaryResponse>(http.get('/api/messages/summary'))
-  },
-  messageConversations(params?: { keyword?: string; page?: number; size?: number }) {
-    return unwrap<PageResponse<MessageConversationView>>(http.get('/api/messages/conversations', { params }))
-  },
-  messageThread(peerId: number, page = 1, size = 80) {
-    return unwrap<PageResponse<MessageItemView>>(http.get(`/api/messages/conversations/${peerId}/thread`, {
-      params: { page, size },
-    }))
-  },
-  sendDirectMessage(peerId: number, content: string) {
-    return unwrap<MessageItemView>(http.post(`/api/messages/conversations/${peerId}`, { content }))
-  },
-  messageNotifications(params?: { type?: 'all' | 'interaction' | 'system'; page?: number; size?: number }) {
-    return unwrap<PageResponse<MessageItemView>>(http.get('/api/messages/notifications', { params }))
-  },
-  markMessageRead(messageId: number) {
-    return unwrap<void>(http.post(`/api/messages/${messageId}/read`))
-  },
-  markAllMessagesRead(box: 'all' | 'direct' | 'notifications' = 'all') {
-    return unwrap<void>(http.post('/api/messages/read-all', null, { params: { box } }))
-  },
-  like(postId: number) {
-    return unwrap<void>(http.post(`/api/interactions/posts/${postId}/like`))
+    const form = new FormData()
+    form.append('file', file)
+    return request<UploadResponse>('/api/media/upload', { method: 'POST', body: form })
   },
   toggleLike(postId: number) {
-    return unwrap<ToggleResult>(http.post(`/api/interactions/posts/${postId}/like/toggle`))
-  },
-  unlike(postId: number) {
-    return unwrap<void>(http.delete(`/api/interactions/posts/${postId}/like`))
-  },
-  favorite(postId: number) {
-    return unwrap<void>(http.post(`/api/interactions/posts/${postId}/favorite`))
+    return request<ToggleResult>(`/api/interactions/posts/${postId}/like/toggle`, { method: 'POST' })
   },
   toggleFavorite(postId: number) {
-    return unwrap<ToggleResult>(http.post(`/api/interactions/posts/${postId}/favorite/toggle`))
-  },
-  unfavorite(postId: number) {
-    return unwrap<void>(http.delete(`/api/interactions/posts/${postId}/favorite`))
-  },
-  comments(postId: number) {
-    return unwrap<CommentView[]>(http.get(`/api/interactions/posts/${postId}/comments`))
+    return request<ToggleResult>(`/api/interactions/posts/${postId}/favorite/toggle`, { method: 'POST' })
   },
   commentsPage(postId: number, page = 1, size = 20) {
-    return unwrap<PageResponse<CommentView>>(guestHttp.get(`/api/interactions/posts/${postId}/comments/page`, { params: { page, size } }))
-  },
-  interactionStatus(postId: number) {
-    return unwrap<PostInteractionStatus>(http.get(`/api/interactions/posts/${postId}/status`))
+    return request<PageResponse<CommentView>>(`/api/interactions/posts/${postId}/comments/page?page=${page}&size=${size}`)
   },
   comment(postId: number, content: string, parentCommentId?: number) {
-    return unwrap<CommentView>(http.post(`/api/interactions/posts/${postId}/comments`, { content, parentCommentId }))
+    return request<CommentView>(`/api/interactions/posts/${postId}/comments`, { method: 'POST', body: JSON.stringify({ content, parentCommentId }) })
   },
-  deleteComment(postId: number, commentId: number) {
-    return unwrap<void>(http.delete(`/api/interactions/posts/${postId}/comments/${commentId}`))
+  interactionStatus(postId: number) {
+    return request<PostInteractionStatus>(`/api/interactions/posts/${postId}/status`)
   },
-  negativeFeedback(postId: number, payload: { feedbackType: string; reason?: string }) {
-    return unwrap<void>(http.post(`/api/interactions/posts/${postId}/negative-feedback`, payload))
+  follow(userId: number, scene = 'detail') {
+    return request<void>(`/api/social/follow/${userId}?scene=${encodeURIComponent(scene)}`, { method: 'POST' })
   },
-  report(postId: number, reason: string) {
-    return unwrap<void>(http.post(`/api/interactions/posts/${postId}/report`, { reason }))
+  unfollow(userId: number) {
+    return request<void>(`/api/social/follow/${userId}`, { method: 'DELETE' })
   },
-  blockUser(userId: number) {
-    return unwrap<void>(http.post(`/api/interactions/posts/block-user/${userId}`))
+  followStatus(userId: number) {
+    return request<FollowStatus>(`/api/social/follow-status/${userId}`)
   },
-  unblockUser(userId: number) {
-    return unwrap<void>(http.delete(`/api/interactions/posts/block-user/${userId}`))
+  profile(userId: number) {
+    return request<UserSummary>(`/api/users/${userId}`)
+  },
+  userStats(userId: number) {
+    return request<UserStats>(`/api/users/${userId}/stats`)
+  },
+  userPosts(userId: number, limit = 30) {
+    return request<PostView[]>(`/api/users/${userId}/posts?limit=${limit}`)
   },
   search(keyword: string) {
-    return unwrap<SearchResult>(http.get('/api/search', { ...slowRequestConfig, params: { keyword } }))
+    return request<SearchResult>(`/api/search?keyword=${encodeURIComponent(keyword)}`)
   },
-  searchPosts(keyword: string) {
-    return unwrap<PostView[]>(http.get('/api/search/posts', { ...slowRequestConfig, params: { keyword } }))
-  },
-  searchUsers(keyword: string) {
-    return unwrap<UserSummary[]>(http.get('/api/search/users', { ...slowRequestConfig, params: { keyword } }))
-  },
-  searchPostsPage(keyword: string, page = 1, size = 12) {
-    return unwrap<PageResponse<PostView>>(http.get('/api/search/posts/page', {
-      ...slowRequestConfig,
-      params: { keyword, page, size },
-    }))
-  },
-  searchUsersPage(keyword: string, page = 1, size = 12) {
-    return unwrap<PageResponse<UserSummary>>(http.get('/api/search/users/page', {
-      ...slowRequestConfig,
-      params: { keyword, page, size },
-    }))
+  trendingTopics(limit = 20) {
+    return request<TopicView[]>(`/api/topics/trending?limit=${limit}`)
   },
 }

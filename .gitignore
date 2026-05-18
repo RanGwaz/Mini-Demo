@@ -1,17 +1,18 @@
+# Java build output
+backend/target/
+
+# Frontend dependencies and build output
 frontend/node_modules/
 frontend/dist/
-backend/target/
-backend/.idea/
+
+# Local IDE and runtime files
 .idea/
-.vscode/
-*.log
-.env
-infra/docker/data/
-infra/docker/models/
-infra/docker/deep-rank-service/.venv-local/
-infra/docker/deep-rank-service/__pycache__/
-**/__pycache__/
-*.pyc
-*.pyo
 *.iml
-*.docx
+.DS_Store
+Thumbs.db
+backend/storage/
+
+# Environment overrides
+.env
+.env.local
+*.log
